@@ -1,19 +1,24 @@
-# flow-ops-ai-server
+# FlowOps AI Server
 
-Basic FastAPI server setup.
+FlowOps QA/QC 자동화 시스템의 AI 서버.
+멀티 에이전트 구조로 시나리오 테스트, 테스트 케이스 생성, 장애 대응을 지원.
 
-## Setup
+## 실행
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+\`\`\`bash
+# 1) 의존성 설치
 pip install -r requirements.txt
-```
 
-## Run
+# 2) 환경변수 설정
+cp .env.example .env
+# .env 파일을 열어 FLOWOPS_ANTHROPIC_API_KEY 입력
 
-```powershell
-uvicorn app.main:app --reload
-```
+# 3) 서버 실행
+uvicorn app.main:app --reload --port 8000
+\`\`\`
 
-Open `http://127.0.0.1:8000`.
+## API 문서
+서버 실행 후 http://localhost:8000/docs 접속.
+
+## 폴더 구조
+자세한 구조는 `PROJECT_STRUCTURE.md` 참조.
