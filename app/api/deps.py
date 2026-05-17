@@ -29,3 +29,8 @@ def get_llm(request: Request) -> "LLMClient":
 def get_testcase_graph(request: Request) -> "CompiledStateGraph":
     """lifespan에서 만들어둔 테스트 케이스 Agent 그래프 반환."""
     return request.app.state.testcase_graph
+
+
+def get_scenario_graph(request: Request) -> "CompiledStateGraph":
+    """lifespan에서 만들어둔 시나리오 Agent 그래프 반환."""
+    return request.app.state.scenario_graph

@@ -5,6 +5,16 @@
 
 from .api_spec import APIEndpoint, APIInventory, AuthScheme, ParameterSpec
 from .common import AgentResponse, HttpMethod, RiskLevel, TokenUsage
+from .scenario import (
+    ChainedVariable,
+    Scenario,
+    ScenarioGenerationMode,
+    ScenarioGenerationRequest,
+    ScenarioGenerationResult,
+    ScenarioMeta,
+    ScenarioStep,
+    VariableSource,
+)
 from .testcase import (
     ApiSpec,
     DraftType,
@@ -49,4 +59,13 @@ __all__ = [
     "TestCaseDraft",
     "TestCaseGenerationRequest",
     "TestCaseGenerationResponse",
+    # scenario
+    "ChainedVariable",
+    "Scenario",
+    "ScenarioGenerationMode",
+    "ScenarioGenerationRequest",
+    "ScenarioGenerationResult",
+    "ScenarioMeta",
+    "ScenarioStep",
+    "VariableSource",
 ]

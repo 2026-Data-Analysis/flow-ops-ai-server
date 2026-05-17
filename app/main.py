@@ -11,7 +11,7 @@
 설계 결정:
 1. lifespan에서 LLM 클라이언트와 컴파일된 그래프를 만들어 app.state에 저장.
    - LLM 객체와 그래프 컴파일을 매 요청마다 하면 큰 낭비.
-2. 라우터 prefix는 라우터 모듈 자체에 있음.
+2. 라우터 prefix 안 붙임. 라우터 모듈 자체에 prefix가 있음.
 """
 
 from __future__ import annotations
@@ -22,7 +22,9 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from app.agents.testcase.graph import build_graph
+from app.agents.scenario.graph import build_graph as build_scenario_graph
+from app.agents.testcase.graph import build_graph as build_testcase_graph
+from app.api.v1 import scenario as scenario_router
 from app.api.v1 import testcase as testcase_router
 from app.core.config import get_settings
 from app.llm import AnthropicClient
@@ -37,7 +39,10 @@ def _configure_logging(level: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """앱 수명주기 동안 1회만 실행되는 셋업/티어다운."""
+    """앱 수명주기 동안 1회만 실행되는 셋업/티어다운.
+
+    여기서 LLM 클라이언트와 그래프를 만들어 app.state에 보관.
+    """
     settings = get_settings()
     _configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
@@ -47,9 +52,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_key=settings.anthropic_api_key.get_secret_value(),
         model=settings.anthropic_model,
     )
-    testcase_graph = build_graph(llm).compile()
+    scenario_graph = build_scenario_graph(llm).compile()
+    testcase_graph = build_testcase_graph(llm).compile()
 
     app.state.llm = llm
+    app.state.scenario_graph = scenario_graph
     app.state.testcase_graph = testcase_graph
 
     try:
@@ -60,11 +67,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="FlowOps AI",
-    description="QA/QC 자동화 멀티 에이전트 서비스 — 테스트 케이스 생성 Agent",
+    description="QA/QC 자동화 멀티 에이전트 서비스",
     version="0.1.0",
     lifespan=lifespan,
 )
 
+# 라우터 등록
+app.include_router(scenario_router.router)
 app.include_router(testcase_router.router)
 
 
