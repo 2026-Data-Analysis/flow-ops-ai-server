@@ -45,3 +45,136 @@ class TestCase(BaseModel):
     )
 
     expected_status_code: int = Field(description="기대 HTTP 상태 코드")
+
+
+# ──── TestCase Generation Agent 전용 확장 ────────────────────────────────────
+
+
+class DraftType(str, Enum):
+    """생성 단계 세부 분류. TestCaseType으로 매핑되어 Backend에 저장된다."""
+
+    HAPPY_PATH = "HAPPY_PATH"         # → NORMAL
+    VALIDATION = "VALIDATION"         # → EXCEPTION
+    FAILURE_HANDLING = "FAILURE_HANDLING"  # → EXCEPTION
+    EDGE_CASE = "EDGE_CASE"           # → BOUNDARY
+    AUTHORIZATION = "AUTHORIZATION"   # → EXCEPTION
+    PERFORMANCE = "PERFORMANCE"       # → NORMAL
+
+
+DRAFT_TO_TEST_CASE_TYPE: dict[DraftType, TestCaseType] = {
+    DraftType.HAPPY_PATH: TestCaseType.NORMAL,
+    DraftType.VALIDATION: TestCaseType.EXCEPTION,
+    DraftType.FAILURE_HANDLING: TestCaseType.EXCEPTION,
+    DraftType.EDGE_CASE: TestCaseType.BOUNDARY,
+    DraftType.AUTHORIZATION: TestCaseType.EXCEPTION,
+    DraftType.PERFORMANCE: TestCaseType.NORMAL,
+}
+
+
+# ── Request sub-models ───────────────────────────────────────────────────────
+
+class ProjectInfo(BaseModel):
+    projectId: str
+    appId: str
+    appName: str
+
+
+class EnvironmentInfo(BaseModel):
+    environmentId: str
+    name: str
+    baseUrl: str
+    defaultTestLevel: str
+
+
+class RequestMetadata(BaseModel):
+    language: str
+    createdAt: str
+    source: str
+
+
+class GenerationContext(BaseModel):
+    generationId: str
+    mode: str
+    testLevel: str
+    currentCoverage: float
+    targetCoverage: float
+    contextSummary: str | None = None
+
+
+class ApiSpec(BaseModel):
+    """Backend(Spring Boot)가 보내는 API 명세. camelCase 컨벤션 유지."""
+
+    apiId: str
+    method: str
+    path: str
+    domainTag: str | None = None
+    requestSchema: dict[str, Any] | None = None
+    responseSchema: dict[str, Any] | None = None
+    authRequired: bool = False
+    deprecated: bool = False
+
+
+class ExistingTestCase(BaseModel):
+    testCaseId: str
+    apiId: str
+    name: str
+    type: DraftType          # Backend 저장 시 DraftType 그대로 보존
+    testLevel: str
+    requestSpec: dict[str, Any] | None = None
+    expectedSpec: dict[str, Any] | None = None
+    assertionSpec: dict[str, Any] | None = None
+
+
+class FailureContext(BaseModel):
+    executionId: str
+    stepId: str
+    statusCode: int | None = None
+    requestBody: dict[str, Any] | None = None
+    responseBody: dict[str, Any] | None = None
+    errorMessage: str | None = None
+    expected: Any = None
+    actual: Any = None
+
+
+# ── Request ──────────────────────────────────────────────────────────────────
+
+class TestCaseGenerationRequest(BaseModel):
+    agent: str
+    requestId: str
+    requestedBy: str
+    project: ProjectInfo
+    environment: EnvironmentInfo
+    metadata: RequestMetadata
+    generationContext: GenerationContext
+    apis: list[ApiSpec]
+    existingTestCases: list[ExistingTestCase] = []
+    failureContext: FailureContext | None = None
+
+
+# ── Response sub-models ──────────────────────────────────────────────────────
+
+class TestCaseDraft(BaseModel):
+    """생성된 테스트 케이스 초안. testLevel은 Backend의 Classifier가 채운다."""
+
+    apiId: str
+    title: str
+    description: str
+    type: DraftType
+    test_case_type: TestCaseType = Field(
+        description="DRAFT_TO_TEST_CASE_TYPE 매핑 결과. 커버리지 분석에 사용.",
+    )
+    userRole: str | None = None
+    stateCondition: str | None = None
+    dataVariant: str | None = None
+    requestSpec: dict[str, Any] | None = None
+    expectedSpec: dict[str, Any] | None = None
+    assertionSpec: dict[str, Any] | None = None
+    duplicate: bool = False
+
+
+# ── Response ─────────────────────────────────────────────────────────────────
+
+class TestCaseGenerationResponse(BaseModel):
+    requestId: str
+    generationId: str
+    drafts: list[TestCaseDraft]

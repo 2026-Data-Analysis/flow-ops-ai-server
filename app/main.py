@@ -22,8 +22,10 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from app.agents.scenario.graph import build_graph
+from app.agents.scenario.graph import build_graph as build_scenario_graph
+from app.agents.testcase.graph import build_graph as build_testcase_graph
 from app.api.v1 import scenario as scenario_router
+from app.api.v1 import testcase as testcase_router
 from app.core.config import get_settings
 from app.llm import AnthropicClient
 
@@ -50,10 +52,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_key=settings.anthropic_api_key.get_secret_value(),
         model=settings.anthropic_model,
     )
-    scenario_graph = build_graph(llm).compile()
+    scenario_graph = build_scenario_graph(llm).compile()
+    testcase_graph = build_testcase_graph(llm).compile()
 
     app.state.llm = llm
     app.state.scenario_graph = scenario_graph
+    app.state.testcase_graph = testcase_graph
 
     try:
         yield
@@ -63,13 +67,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="FlowOps AI",
-    description="QA/QC 자동화 멀티 에이전트 서비스 — 시나리오 테스트 Agent",
+    description="QA/QC 자동화 멀티 에이전트 서비스",
     version="0.1.0",
     lifespan=lifespan,
 )
 
 # 라우터 등록
 app.include_router(scenario_router.router)
+app.include_router(testcase_router.router)
 
 
 @app.get("/health", tags=["meta"], summary="헬스 체크")

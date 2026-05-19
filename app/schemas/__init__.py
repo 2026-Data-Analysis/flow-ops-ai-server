@@ -15,7 +15,22 @@ from .scenario import (
     ScenarioStep,
     VariableSource,
 )
-from .testcase import TestCase, TestCaseType
+from .testcase import (
+    ApiSpec,
+    DraftType,
+    DRAFT_TO_TEST_CASE_TYPE,
+    EnvironmentInfo,
+    ExistingTestCase,
+    FailureContext,
+    GenerationContext,
+    ProjectInfo,
+    RequestMetadata,
+    TestCase,
+    TestCaseDraft,
+    TestCaseGenerationRequest,
+    TestCaseGenerationResponse,
+    TestCaseType,
+)
 
 __all__ = [
     # common
@@ -28,9 +43,22 @@ __all__ = [
     "APIInventory",
     "AuthScheme",
     "ParameterSpec",
-    # testcase
+    # testcase — shared
     "TestCase",
     "TestCaseType",
+    # testcase — generation agent
+    "ApiSpec",
+    "DraftType",
+    "DRAFT_TO_TEST_CASE_TYPE",
+    "EnvironmentInfo",
+    "ExistingTestCase",
+    "FailureContext",
+    "GenerationContext",
+    "ProjectInfo",
+    "RequestMetadata",
+    "TestCaseDraft",
+    "TestCaseGenerationRequest",
+    "TestCaseGenerationResponse",
     # scenario
     "ChainedVariable",
     "Scenario",
