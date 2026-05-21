@@ -43,6 +43,9 @@ async def run_testcase_agent(
     if final_state.get("error"):
         raise ValueError(final_state["error"])
 
+    if not final_state["drafts"]:
+        raise ValueError("No test cases generated. Please retry.")
+
     return TestCaseGenerationResponse(
         requestId=request.requestId,
         generationId=request.generationContext.generationId,
