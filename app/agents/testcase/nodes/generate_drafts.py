@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agents.testcase.state import TestCaseAgentState
 from app.llm.prompts.testcase_generation import SYSTEM_PROMPT, build_generation_prompt
@@ -17,9 +17,34 @@ class _RawDraft(BaseModel):
     userRole: str | None = None
     stateCondition: str | None = None
     dataVariant: str | None = None
-    requestSpec: dict[str, Any] | None = None
-    expectedSpec: dict[str, Any] | None = None
-    assertionSpec: dict[str, Any] | None = None
+    requestSpec: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Exact values to send in the request. Include: "
+            "method (GET/POST/...), pathParams (e.g. {userId: 1}), "
+            "queryParams (e.g. {page: 1, size: 10}), "
+            "body (request body object with concrete example values)."
+        ),
+    )
+    expectedSpec: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "What the response should look like. Include: "
+            "statusCode (e.g. 200, 400, 401, 404, 500), "
+            "body (expected response body structure with example values or key fields), "
+            "errorMessage (expected error message string for failure cases)."
+        ),
+    )
+    assertionSpec: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Specific assertions to verify after the request. Include: "
+            "statusCode (exact expected HTTP status code as int), "
+            "bodyContains (list of keys or substrings that must appear in the response body), "
+            "bodyEquals (exact field-value pairs to match), "
+            "headerContains (response headers to check, e.g. {Content-Type: application/json})."
+        ),
+    )
 
 
 class _DraftListOutput(BaseModel):

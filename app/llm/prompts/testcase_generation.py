@@ -27,6 +27,33 @@ Generate 5-8 test cases. Use only these type values:
 - EDGE_CASE: Boundary values, empty arrays, max-length strings, null fields
 - AUTHORIZATION: Missing/expired/insufficient-permission tokens (only if authRequired=true)
 - PERFORMANCE: High-load or large-payload scenarios
+
+## Language
+Write title and description in Korean.
+- title example: "유효한 자격증명으로 로그인 성공"
+- description example: "올바른 이메일과 비밀번호로 로그인 시 200 응답과 토큰 반환 확인"
+
+## Output Fields
+Fill every field below for each test case. Do NOT leave expectedSpec null.
+
+**requestSpec** — concrete values to send:
+```json
+{{"method": "POST", "pathParams": {{"userId": 1}}, "queryParams": {{"page": 1}}, "body": {{"email": "test@example.com", "password": "secret123"}}}}
+```
+
+**expectedSpec** — what the response should look like:
+```json
+{{"statusCode": 200, "body": {{"id": 1, "email": "test@example.com"}}, "errorMessage": null}}
+```
+For error cases use the appropriate status code and fill errorMessage:
+```json
+{{"statusCode": 400, "body": {{"error": "email is required"}}, "errorMessage": "Validation failed: email must not be blank"}}
+```
+
+**assertionSpec** — specific assertions to verify:
+```json
+{{"statusCode": 200, "bodyContains": ["id", "email"], "bodyEquals": {{"email": "test@example.com"}}, "headerContains": {{"Content-Type": "application/json"}}}}
+```
 """
 
 
