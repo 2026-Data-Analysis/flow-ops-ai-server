@@ -160,7 +160,8 @@ class TestCaseDraft(BaseModel):
     title: str
     description: str
     type: DraftType
-    test_case_type: TestCaseType = Field(
+    test_case_type: TestCaseType | None = Field(
+        default=None,
         description="DRAFT_TO_TEST_CASE_TYPE 매핑 결과. 커버리지 분석에 사용.",
     )
     userRole: str | None = None
