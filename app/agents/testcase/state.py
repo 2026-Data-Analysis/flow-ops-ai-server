@@ -10,3 +10,4 @@ class TestCaseAgentState(TypedDict):
     raw_drafts: list[dict[str, Any]]   # LLM raw output before dedup
     drafts: list[TestCaseDraft]        # final output
     error: str | None
+    retry_count: int

@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import re
 from typing import Any
+
+from json_repair import repair_json
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +54,30 @@ class _DraftListOutput(BaseModel):
     drafts: list[_RawDraft]
 
 
+_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.DOTALL)
+
+
+def _coerce_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Guard against the model returning `drafts` as a JSON string instead of an array.
+
+    Tool Use guarantees the outer object is a dict, but the model occasionally
+    serialises the array value as a string (plain or markdown-fenced, possibly
+    with minor syntax errors such as missing commas).  repair_json handles those
+    cases before Pydantic validation.
+    """
+    drafts = result.get("drafts")
+    if not isinstance(drafts, str):
+        return result
+    cleaned = _FENCE_RE.sub("", drafts).strip()
+    parsed = repair_json(cleaned, return_objects=True)
+    if not isinstance(parsed, list):
+        raise ValueError(
+            f"LLM returned drafts as a string that could not be coerced to a list "
+            f"(got {type(parsed).__name__!r} after repair). Raw value: {cleaned[:120]!r}"
+        )
+    return {**result, "drafts": parsed}
+
+
 async def generate_drafts(state: TestCaseAgentState) -> dict:
     """LLM Tool Use로 각 API별 테스트 케이스 초안을 생성한다."""
     if state.get("error"):
@@ -88,7 +115,7 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
                     "exception, and boundary scenarios"
                 ),
             )
-            output = _DraftListOutput.model_validate(result)
+            output = _DraftListOutput.model_validate(_coerce_tool_result(result))
             for draft in output.drafts:
                 raw_drafts.append({**draft.model_dump(), "apiId": api.apiId})
         except Exception as exc:
