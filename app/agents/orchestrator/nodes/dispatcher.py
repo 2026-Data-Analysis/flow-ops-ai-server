@@ -64,6 +64,8 @@ def make_dispatcher_node(
                     result = _run_scenario(scenario_graph, project_id, context, intent)
                 elif agent_type == "incident":
                     result = _run_incident(incident_graph, project_id, context, intent)
+                elif agent_type == "general":
+                    result = _run_general(state, llm)
                 else:
                     result = AgentCallResult(
                         agent_type=agent_type,
@@ -300,3 +302,23 @@ def _run_incident(graph, project_id: str, context: dict, intent: dict) -> AgentC
         },
         error_message=None,
     )
+
+def _run_general(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    from app.agents.general import ask
+
+    user_prompt = state.get("user_prompt", "")
+    try:
+        answer = ask(user_prompt, llm)
+        return AgentCallResult(
+            agent_type="general",
+            success=True,
+            data={"answer": answer},
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="general",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )

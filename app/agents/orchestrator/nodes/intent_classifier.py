@@ -114,14 +114,19 @@ def make_intent_classifier_node(llm: LLMClient):
             })
 
         if not valid_intents:
-            return {
-                "errors": [OrchestratorError(
-                    node="intent_classifier",
-                    code="NO_VALID_INTENT",
-                    message="인식 가능한 Agent 의도를 찾지 못했습니다. 요청을 더 구체적으로 작성해주세요.",
-                )],
-                "token_usages": [usage],
-            }
+            # 수정 후: general로 fallback
+            logger.warning("intent_classifier: no valid intent found, falling back to general")
+            valid_intents = [{
+                "agent": "general",
+                "priority": 1,
+                "reason": "분류 실패 fallback",
+                "user_intent": None,
+            }]
+
+        return {
+            "intent_plan": valid_intents,
+            "token_usages": [usage],
+        }
 
         return {
             "intent_plan": valid_intents,

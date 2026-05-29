@@ -41,7 +41,9 @@ def build_user_prompt(
     else:
         context_info.append("- 로그 데이터: 없음 (incident 사용 불가)")
 
-    context_text = "\n".join(context_info)
+    context_info.append("- general: 항상 사용 가능 (조건 없음)")
+
+    context_text = "\n".join(context_info)  # ✅ 이 줄이 빠져있었음
 
     return f"""\
 사용자 요청:
