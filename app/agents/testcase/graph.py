@@ -48,3 +48,32 @@ async def run_testcase_agent(
         generationId=request.generationContext.generationId,
         drafts=final_state["drafts"],
     )
+
+# orchestrator를 위한 동기 버전 추가
+def run_testcase_agent_sync(
+    request: TestCaseGenerationRequest,
+    graph,
+    llm: LLMClient,
+) -> TestCaseGenerationResponse:
+    initial_state: TestCaseAgentState = {
+        "llm": llm,
+        "request": request,
+        "raw_drafts": [],
+        "drafts": [],
+        "error": None,
+    }
+
+    # ainvoke 대신 invoke 사용
+    final_state: TestCaseAgentState = graph.invoke(initial_state)
+
+    if final_state.get("error"):
+        raise ValueError(final_state["error"])
+
+    if not final_state["drafts"]:
+        raise ValueError("No test cases generated. Please retry.")
+
+    return TestCaseGenerationResponse(
+        requestId=request.requestId,
+        generationId=request.generationContext.generationId,
+        drafts=final_state["drafts"],
+    )

@@ -135,8 +135,7 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
         )
 
         try:
-            result, _ = await asyncio.to_thread(
-                llm.generate_structured,
+            result, _ = llm.generate_structured(  # ← asyncio.to_thread 제거, 직접 호출
                 system=SYSTEM_PROMPT,
                 user=prompt,
                 output_schema=_DraftListOutput.model_json_schema(),
