@@ -9,7 +9,7 @@ from app.schemas.testcase import TestCaseGenerationRequest, TestCaseGenerationRe
 router = APIRouter(prefix="/api/v1/agents/testcase", tags=["Test Case Generation"])
 
 
-@router.post("/generate", response_model=TestCaseGenerationResponse)
+@router.post("/generate", response_model=TestCaseGenerationResponse, summary="테스트 생성")
 async def generate_test_cases(
     request: TestCaseGenerationRequest,
     graph: CompiledStateGraph = Depends(get_testcase_graph),
