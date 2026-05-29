@@ -45,7 +45,7 @@ class _ClassifierOutput(BaseModel):
     intents: list[_IntentItem]
 
 
-_ALLOWED_AGENTS = {"testcase", "scenario", "incident", "general", "application", "environment"}
+_ALLOWED_AGENTS = {"testcase", "scenario", "incident", "general", "application", "environment", "api_management"}
 
 
 def make_intent_classifier_node(llm: LLMClient):

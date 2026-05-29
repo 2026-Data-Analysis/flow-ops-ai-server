@@ -17,13 +17,16 @@ SYSTEM_PROMPT = """\
    트리거 키워드: application, 앱, 등록, 앱 만들어, 앱 삭제, 앱 수정, 앱 조회
 5. environment — Environment CRUD 처리 (생성/조회/수정/삭제).
    트리거 키워드: environment, env, 환경, 환경 등록, 브랜치, baseUrl, triggerType
-6. general     — 위 Agent에 해당하지 않는 일반 질문 답변.
+6. api_management — API 검색 및 조회. 서버에서 API 목록을 가져와 결과 기반으로 응답.
+   트리거 키워드: API 찾아줘, GET API, POST 메서드, API 조회, 엔드포인트 찾기
+7. general     — 위 Agent에 해당하지 않는 일반 질문 답변.
    트리거 키워드: 사용법, 질문, 뭐야, 어떻게, 설명, 알려줘
 
 결정 원칙:
 - 하나의 요청에서 여러 Agent가 필요하면 모두 포함하고 priority로 순서를 지정하세요.
 - api_inventory가 없으면 testcase/scenario는 선택하지 마세요.
 - 로그 정보가 없으면 incident는 선택하지 마세요.
+- api_management는 context에 api_server_url이 있어야 사용 가능합니다.
 - application/environment/general은 항상 선택 가능합니다. 컨텍스트 조건이 없습니다.
 - 위 Agent 중 어디에도 해당하지 않으면 반드시 general을 선택하세요.
 - 어떤 경우에도 빈 배열을 반환하면 안 됩니다. 반드시 하나 이상 선택하세요.

@@ -22,6 +22,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from app.agents.api_management.graph import build_graph as build_api_management_graph
 from app.agents.incident.graph import build_graph as build_incident_graph
 from app.agents.orchestrator.graph import build_graph as build_orchestrator_graph
 from app.agents.scenario.graph import build_graph as build_scenario_graph
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     testcase_graph = build_testcase_graph(llm).compile()
     scenario_graph = build_scenario_graph(llm).compile()
     incident_graph = build_incident_graph(llm).compile()
+    api_management_graph = build_api_management_graph(llm).compile()
 
     # Orchestrator는 위 세 그래프를 모두 주입받음
     orchestrator_graph = build_orchestrator_graph(
@@ -65,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         testcase_graph=testcase_graph,
         scenario_graph=scenario_graph,
         incident_graph=incident_graph,
+        api_management_graph=api_management_graph,
     ).compile()
 
     app.state.llm = llm
@@ -72,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.scenario_graph = scenario_graph
     app.state.incident_graph = incident_graph
     app.state.orchestrator_graph = orchestrator_graph
+    app.state.api_management_graph = api_management_graph
 
     try:
         yield

@@ -17,7 +17,8 @@ _AGENT_LABELS = {
     "incident": "장애 원인 분석",
     "general": "일반 질문 답변",
     "application": "Application 관리",    
-    "environment": "Environment 관리",    
+    "environment": "Environment 관리", 
+    "api_management": "API 조회",
 }
 
 
@@ -65,6 +66,11 @@ def _success_detail(result: AgentCallResult) -> str:
         return f"원인 후보 {len(causes)}건 도출 — 주요 원인: {top}"
     
     if agent == "application" or agent == "environment":
+        status = data.get("status", "")
+        user_message = data.get("userMessage", "")
+        return f"{status} — {user_message}"
+    
+    if agent == "api_management":
         status = data.get("status", "")
         user_message = data.get("userMessage", "")
         return f"{status} — {user_message}"
