@@ -36,6 +36,7 @@ def make_dispatcher_node(
     testcase_graph: CompiledStateGraph,
     scenario_graph: CompiledStateGraph,
     incident_graph: CompiledStateGraph,
+    api_management_graph: CompiledStateGraph,
     llm,  # TestCase agent는 llm을 state에 넣음
 ):
     def dispatcher_node(state: OrchestratorAgentState) -> dict:
@@ -68,6 +69,8 @@ def make_dispatcher_node(
                     result = _run_application(state, llm)
                 elif agent_type == "environment":
                     result = _run_environment(state, llm)
+                elif agent_type == "api_management":
+                    result = _run_api_management(api_management_graph, state)
                 elif agent_type == "general":
                     result = _run_general(state, llm)
                 else:
@@ -381,3 +384,38 @@ def _run_environment(state: OrchestratorAgentState, llm) -> AgentCallResult:
             data=None,
             error_message=str(e),
         )
+    
+def _run_api_management(graph, state: OrchestratorAgentState) -> AgentCallResult:
+    from app.agents.api_management.state import initial_state as api_mgmt_initial_state
+
+    trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+    init = api_mgmt_initial_state(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        trace_id=trace_id,
+    )
+    final = graph.invoke(init)
+
+    user_message = final.get("user_message")
+    if not user_message:
+        errors = final.get("errors", [])
+        return AgentCallResult(
+            agent_type="api_management",
+            success=False,
+            data=None,
+            error_message=errors[0]["message"] if errors else "API 조회 실패",
+        )
+
+    return AgentCallResult(
+        agent_type="api_management",
+        success=True,
+        data={
+            "intent": final.get("intent"),
+            "confidence": final.get("confidence"),
+            "status": final.get("status"),
+            "target": final.get("target"),
+            "action": final.get("action"),
+            "userMessage": user_message,
+        },
+        error_message=None,
+    )

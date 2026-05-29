@@ -30,6 +30,7 @@ def build_graph(
     testcase_graph: CompiledStateGraph,
     scenario_graph: CompiledStateGraph,
     incident_graph: CompiledStateGraph,
+    api_management_graph: CompiledStateGraph,
 ) -> StateGraph:
     """Orchestrator 그래프 빌드.
 
@@ -44,7 +45,7 @@ def build_graph(
     graph.add_node("intent_classifier", make_intent_classifier_node(llm))
     graph.add_node(
         "dispatcher",
-        make_dispatcher_node(testcase_graph, scenario_graph, incident_graph, llm),
+        make_dispatcher_node(testcase_graph, scenario_graph, incident_graph, api_management_graph, llm),
     )
     graph.add_node("aggregator", aggregator_node)
 
