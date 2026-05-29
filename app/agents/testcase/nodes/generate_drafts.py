@@ -89,7 +89,25 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
     env = req.environment
     raw_drafts: list[dict[str, Any]] = []
 
+    logger.info(
+        "generate_drafts.enter requestId=%s generationId=%s api_count=%d existing_count=%d",
+        req.requestId,
+        ctx.generationId,
+        len(req.apis),
+        len(req.existingTestCases),
+    )
+
     for api in req.apis:
+        logger.info(
+            "generate_drafts.api_start requestId=%s apiId=%s "
+            "contextSummaryLen=%d contextSummary=%r requestSchema=%s responseSchema=%s",
+            req.requestId,
+            api.apiId,
+            len(ctx.contextSummary) if ctx.contextSummary else 0,
+            ctx.contextSummary,
+            api.requestSchema is not None,
+            api.responseSchema is not None,
+        )
         prompt = build_generation_prompt(
             api_id=api.apiId,
             method=api.method,
@@ -101,6 +119,14 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             env_name=env.name,
             base_url=env.baseUrl,
             context_summary=ctx.contextSummary,
+        )
+
+        logger.info(
+            "generate_drafts.llm_input requestId=%s apiId=%s prompt_len=%d prompt=%s",
+            req.requestId,
+            api.apiId,
+            len(prompt),
+            prompt,
         )
 
         try:
@@ -115,10 +141,26 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
                     "exception, and boundary scenarios"
                 ),
             )
+            drafts_raw = result.get("drafts")
+            logger.info(
+                "generate_drafts.llm_output requestId=%s apiId=%s "
+                "drafts_type=%s drafts_count=%s result=%r",
+                req.requestId,
+                api.apiId,
+                type(drafts_raw).__name__,
+                len(drafts_raw) if isinstance(drafts_raw, (list, str)) else "n/a",
+                result,
+            )
             output = _DraftListOutput.model_validate(_coerce_tool_result(result))
             for draft in output.drafts:
                 raw_drafts.append({**draft.model_dump(), "apiId": api.apiId})
         except Exception as exc:
-            logger.warning("LLM generation failed for api %s: %s", api.apiId, exc)
+            logger.warning(
+                "generate_drafts.llm_failed requestId=%s apiId=%s error=%s",
+                req.requestId,
+                api.apiId,
+                exc,
+                exc_info=True,
+            )
 
     return {**state, "raw_drafts": raw_drafts}
