@@ -19,7 +19,8 @@ async def generate_test_cases(
     graph: CompiledStateGraph = Depends(get_testcase_graph),
     llm: LLMClient = Depends(get_llm),
 ) -> TestCaseGenerationResponse:
-    logger.info(
+    logger.info("testcase_generate.request requestId=%s", request.requestId)
+    logger.debug(
         "testcase_generate.request requestId=%s payload=%s",
         request.requestId,
         request.model_dump_json(),
