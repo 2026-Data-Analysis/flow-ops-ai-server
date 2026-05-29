@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import re
 from typing import Any
+
+from json_repair import repair_json
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +54,30 @@ class _DraftListOutput(BaseModel):
     drafts: list[_RawDraft]
 
 
+_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.DOTALL)
+
+
+def _coerce_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Guard against the model returning `drafts` as a JSON string instead of an array.
+
+    Tool Use guarantees the outer object is a dict, but the model occasionally
+    serialises the array value as a string (plain or markdown-fenced, possibly
+    with minor syntax errors such as missing commas).  repair_json handles those
+    cases before Pydantic validation.
+    """
+    drafts = result.get("drafts")
+    if not isinstance(drafts, str):
+        return result
+    cleaned = _FENCE_RE.sub("", drafts).strip()
+    parsed = repair_json(cleaned, return_objects=True)
+    if not isinstance(parsed, list):
+        raise ValueError(
+            f"LLM returned drafts as a string that could not be coerced to a list "
+            f"(got {type(parsed).__name__!r} after repair). Raw value: {cleaned[:120]!r}"
+        )
+    return {**result, "drafts": parsed}
+
+
 async def generate_drafts(state: TestCaseAgentState) -> dict:
     """LLM Tool Use로 각 API별 테스트 케이스 초안을 생성한다."""
     if state.get("error"):
@@ -62,7 +89,30 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
     env = req.environment
     raw_drafts: list[dict[str, Any]] = []
 
+    logger.info(
+        "generate_drafts.enter requestId=%s generationId=%s api_count=%d existing_count=%d",
+        req.requestId,
+        ctx.generationId,
+        len(req.apis),
+        len(req.existingTestCases),
+    )
+
     for api in req.apis:
+        logger.info(
+            "generate_drafts.api_start requestId=%s apiId=%s "
+            "contextSummaryLen=%d requestSchema=%s responseSchema=%s",
+            req.requestId,
+            api.apiId,
+            len(ctx.contextSummary) if ctx.contextSummary else 0,
+            api.requestSchema is not None,
+            api.responseSchema is not None,
+        )
+        logger.debug(
+            "generate_drafts.api_start requestId=%s apiId=%s contextSummary=%r",
+            req.requestId,
+            api.apiId,
+            ctx.contextSummary,
+        )
         prompt = build_generation_prompt(
             api_id=api.apiId,
             method=api.method,
@@ -76,6 +126,14 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             context_summary=ctx.contextSummary,
         )
 
+        logger.debug(
+            "generate_drafts.llm_input requestId=%s apiId=%s prompt_len=%d prompt=%s",
+            req.requestId,
+            api.apiId,
+            len(prompt),
+            prompt,
+        )
+
         try:
             result, _ = llm.generate_structured(  # ← asyncio.to_thread 제거, 직접 호출
                 system=SYSTEM_PROMPT,
@@ -87,10 +145,31 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
                     "exception, and boundary scenarios"
                 ),
             )
-            output = _DraftListOutput.model_validate(result)
+            drafts_raw = result.get("drafts")
+            logger.info(
+                "generate_drafts.llm_output requestId=%s apiId=%s "
+                "drafts_type=%s drafts_count=%s",
+                req.requestId,
+                api.apiId,
+                type(drafts_raw).__name__,
+                len(drafts_raw) if isinstance(drafts_raw, (list, str)) else "n/a",
+            )
+            logger.debug(
+                "generate_drafts.llm_output requestId=%s apiId=%s result=%r",
+                req.requestId,
+                api.apiId,
+                result,
+            )
+            output = _DraftListOutput.model_validate(_coerce_tool_result(result))
             for draft in output.drafts:
                 raw_drafts.append({**draft.model_dump(), "apiId": api.apiId})
         except Exception as exc:
-            logger.warning("LLM generation failed for api %s: %s", api.apiId, exc)
+            logger.warning(
+                "generate_drafts.llm_failed requestId=%s apiId=%s error=%s",
+                req.requestId,
+                api.apiId,
+                exc,
+                exc_info=True,
+            )
 
     return {**state, "raw_drafts": raw_drafts}

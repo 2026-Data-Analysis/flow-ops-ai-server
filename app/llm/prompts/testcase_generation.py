@@ -1,6 +1,7 @@
 SYSTEM_PROMPT = """\
 You are a senior QA engineer specializing in API test case design.
 Generate thorough, structured test cases that cover all critical scenarios for the given API endpoint.
+Always call the provided tool and pass the 'drafts' field as a JSON array of objects — never as a string, never wrapped in markdown fences.
 """
 
 GENERATION_PROMPT_TEMPLATE = """\
@@ -54,6 +55,12 @@ For error cases use the appropriate status code and fill errorMessage:
 ```json
 {{"statusCode": 200, "bodyContains": ["id", "email"], "bodyEquals": {{"email": "test@example.com"}}, "headerContains": {{"Content-Type": "application/json"}}}}
 ```
+
+## Output Format (STRICT)
+- Call the tool with the `drafts` key set to a **JSON array** of test case objects.
+- Do NOT serialize the array as a string value.
+- Do NOT wrap any value in markdown fences (```json ... ```).
+- Do NOT include explanatory text outside the tool call.
 """
 
 
