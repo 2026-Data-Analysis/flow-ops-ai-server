@@ -8,10 +8,10 @@
     FLOWOPS_ANTHROPIC_MODEL=claude-sonnet-4-5  (선택)
     FLOWOPS_LOG_LEVEL=INFO                      (선택)
 
-설계 결정:
-1. lifespan에서 LLM 클라이언트와 컴파일된 그래프를 만들어 app.state에 저장.
-   - LLM 객체와 그래프 컴파일을 매 요청마다 하면 큰 낭비.
-2. 라우터 prefix 안 붙임. 라우터 모듈 자체에 prefix가 있음.
+그래프 빌드 순서 (의존 관계 주의):
+1. llm
+2. testcase_graph, scenario_graph, incident_graph  (독립)
+3. orchestrator_graph  (위 세 그래프를 주입받음)
 """
 
 from __future__ import annotations
@@ -22,8 +22,12 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from app.agents.incident.graph import build_graph as build_incident_graph
+from app.agents.orchestrator.graph import build_graph as build_orchestrator_graph
 from app.agents.scenario.graph import build_graph as build_scenario_graph
 from app.agents.testcase.graph import build_graph as build_testcase_graph
+from app.api.v1 import incident as incident_router
+from app.api.v1 import orchestrator as orchestrator_router
 from app.api.v1 import scenario as scenario_router
 from app.api.v1 import testcase as testcase_router
 from app.core.config import get_settings
@@ -39,10 +43,7 @@ def _configure_logging(level: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """앱 수명주기 동안 1회만 실행되는 셋업/티어다운.
-
-    여기서 LLM 클라이언트와 그래프를 만들어 app.state에 보관.
-    """
+    """앱 수명주기 동안 1회만 실행되는 셋업/티어다운."""
     settings = get_settings()
     _configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
@@ -52,12 +53,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_key=settings.anthropic_api_key.get_secret_value(),
         model=settings.anthropic_model,
     )
-    scenario_graph = build_scenario_graph(llm).compile()
+
+    # 독립 그래프 먼저 컴파일
     testcase_graph = build_testcase_graph(llm).compile()
+    scenario_graph = build_scenario_graph(llm).compile()
+    incident_graph = build_incident_graph(llm).compile()
+
+    # Orchestrator는 위 세 그래프를 모두 주입받음
+    orchestrator_graph = build_orchestrator_graph(
+        llm=llm,
+        testcase_graph=testcase_graph,
+        scenario_graph=scenario_graph,
+        incident_graph=incident_graph,
+    ).compile()
 
     app.state.llm = llm
-    app.state.scenario_graph = scenario_graph
     app.state.testcase_graph = testcase_graph
+    app.state.scenario_graph = scenario_graph
+    app.state.incident_graph = incident_graph
+    app.state.orchestrator_graph = orchestrator_graph
 
     try:
         yield
@@ -68,16 +82,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="FlowOps AI",
     description="QA/QC 자동화 멀티 에이전트 서비스",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 # 라우터 등록
 app.include_router(scenario_router.router)
 app.include_router(testcase_router.router)
+app.include_router(incident_router.router)
+app.include_router(orchestrator_router.router)
 
 
 @app.get("/health", tags=["meta"], summary="헬스 체크")
 def health() -> dict[str, str]:
-    """간단한 liveness 체크. 외부 의존성(LLM API)은 검사하지 않음."""
     return {"status": "ok"}
