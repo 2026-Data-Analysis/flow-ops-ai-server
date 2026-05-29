@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class _IntentItem(BaseModel):
-    agent: str = Field(description="testcase | scenario | incident")
+    agent: str = Field(description="testcase | scenario | incident | application | environment | general")
     priority: int = Field(ge=1, description="실행 우선순위 (1이 가장 먼저)")
     reason: str = Field(description="이 Agent를 선택한 이유 한 줄")
     user_intent: str | None = Field(
@@ -45,7 +45,7 @@ class _ClassifierOutput(BaseModel):
     intents: list[_IntentItem]
 
 
-_ALLOWED_AGENTS = {"testcase", "scenario", "incident"}
+_ALLOWED_AGENTS = {"testcase", "scenario", "incident", "general", "application", "environment"}
 
 
 def make_intent_classifier_node(llm: LLMClient):
@@ -122,11 +122,6 @@ def make_intent_classifier_node(llm: LLMClient):
                 "reason": "분류 실패 fallback",
                 "user_intent": None,
             }]
-
-        return {
-            "intent_plan": valid_intents,
-            "token_usages": [usage],
-        }
 
         return {
             "intent_plan": valid_intents,
