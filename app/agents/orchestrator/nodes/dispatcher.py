@@ -64,6 +64,12 @@ def make_dispatcher_node(
                     result = _run_scenario(scenario_graph, project_id, context, intent)
                 elif agent_type == "incident":
                     result = _run_incident(incident_graph, project_id, context, intent)
+                elif agent_type == "application":
+                    result = _run_application(state, llm)
+                elif agent_type == "environment":
+                    result = _run_environment(state, llm)
+                elif agent_type == "general":
+                    result = _run_general(state, llm)
                 else:
                     result = AgentCallResult(
                         agent_type=agent_type,
@@ -300,3 +306,78 @@ def _run_incident(graph, project_id: str, context: dict, intent: dict) -> AgentC
         },
         error_message=None,
     )
+
+def _run_general(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    from app.agents.general import ask
+
+    user_prompt = state.get("user_prompt", "")
+    try:
+        answer = ask(user_prompt, llm)
+        return AgentCallResult(
+            agent_type="general",
+            success=True,
+            data={"answer": answer},
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="general",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
+    
+def _run_application(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    """Application Agent 호출."""
+    from app.agents.application import handle
+    from app.schemas.chat import ChatRequest
+
+    request = ChatRequest(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        formSubmission=state.get("context", {}).get("formSubmission"),
+    )
+
+    try:
+        response = handle(request, llm)
+        return AgentCallResult(
+            agent_type="application",
+            success=True,
+            data=response.model_dump(),
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="application",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
+
+
+def _run_environment(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    """Environment Agent 호출."""
+    from app.agents.environment import handle
+    from app.schemas.chat import ChatRequest
+
+    request = ChatRequest(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        formSubmission=state.get("context", {}).get("formSubmission"),
+    )
+
+    try:
+        response = handle(request, llm)
+        return AgentCallResult(
+            agent_type="environment",
+            success=True,
+            data=response.model_dump(),
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="environment",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
