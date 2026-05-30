@@ -7,6 +7,17 @@
    - LLM이 잘못된 경로를 만들어도 검증 가능
 2. 시나리오 메타(rationale, coverage_gap)는 시나리오 자체와 분리해서 추천 모드에서만 채움.
 3. 모든 ID는 LLM이 생성하지 않고 서버에서 발급(uuid). LLM은 step_ref로만 참조.
+
+[1단계 변경 - shared memory 호환]
+ScenarioStep을 테스트케이스 초안(TestCaseDraft)과 동일한 필드 세트로 정렬한다.
+백엔드/프론트가 시나리오 step과 testcase draft를 동일한 방식으로 파싱·저장·표시할 수 있게 함.
+단, 시나리오의 본질인 실행 순서(ref/order)와 응답 체이닝(chained_variables)은
+draft 필드 위에 '병합'해서 유지한다 (교체 아님).
+- 기존 endpoint_id -> apiId
+- 기존 name        -> title
+- 기존 static_payload / static_params      -> requestSpec(body / pathParams / queryParams)
+- 기존 expected_status_code                -> expectedSpec.statusCode / assertionSpec.statusCode
+- 기존 expected_assertions                 -> (전환기 보존 필드. Step 2에서 assertionSpec.bodyContains로 흡수 예정)
 """
 
 from __future__ import annotations
@@ -19,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from .api_spec import APIInventory
 from .common import RiskLevel
-from .testcase import TestCase
+from .testcase import DraftType, TestCase, TestCaseType
 
 
 # ---------------------------------------------------------------------------
@@ -97,43 +108,72 @@ class ChainedVariable(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Scenario Step
+# Scenario Step  (testcase draft 호환 + 시나리오 고유 필드 병합)
 # ---------------------------------------------------------------------------
 
 
 class ScenarioStep(BaseModel):
     """시나리오를 구성하는 단일 API 호출 스텝.
 
+    필드 구성:
+    - 시나리오 고유: step_id, ref, order, chained_variables
+      (실행 순서와 응답 체이닝 — 시나리오의 본질이므로 유지)
+    - testcase draft 호환: apiId, title, description, type, test_case_type,
+      userRole, stateCondition, dataVariant, requestSpec, expectedSpec,
+      assertionSpec, duplicate
+      (TestCaseDraft와 동일 구조로 shared memory에서 동일하게 파싱·저장)
+
     LLM은 ref(예: 'step_1', 'step_2')만 생성하고, 실제 실행 ID(step_id)는
     서버에서 uuid로 발급한다.
     """
 
+    # === 시나리오 고유: 실행 순서 / 체이닝 ===
     step_id: str = Field(default_factory=lambda: str(uuid4()))
     ref: str = Field(description="LLM·다른 스텝이 참조할 단축 식별자. 예: 'step_1'")
     order: int = Field(description="시나리오 내 실행 순서 (1부터)")
 
-    endpoint_id: str = Field(description="호출할 APIEndpoint.endpoint_id")
-    name: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름. 예: '로그인'")
-    description: str | None = None
-
-    # 입력 값 (체이닝되지 않는 고정 값들). 동적 값은 chained_variables에서 처리.
-    static_payload: dict[str, Any] | None = Field(
-        default=None,
-        description="요청 바디의 고정 부분",
-    )
-    static_params: dict[str, Any] = Field(
-        default_factory=dict,
-        description="경로/쿼리 파라미터의 고정 부분",
-    )
-
     # 이 스텝이 사용하는 체이닝 변수들 (이전 스텝에서 가져옴)
     chained_variables: list[ChainedVariable] = Field(default_factory=list)
 
-    # 이 스텝의 검증 기준 (간단하게만)
-    expected_status_code: int = Field(default=200)
+    # === testcase draft 호환 필드 ===
+    apiId: str = Field(description="호출할 APIEndpoint.endpoint_id (기존 endpoint_id)")
+    title: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름 (기존 name). 예: '로그인'")
+    description: str | None = None
+
+    type: DraftType = Field(
+        default=DraftType.HAPPY_PATH,
+        description="생성 분류 (HAPPY_PATH / VALIDATION / ... )",
+    )
+    test_case_type: TestCaseType | None = Field(
+        default=None,
+        description="DRAFT_TO_TEST_CASE_TYPE 매핑 결과 (NORMAL / EXCEPTION / BOUNDARY)",
+    )
+
+    userRole: str | None = None
+    stateCondition: str | None = None
+    dataVariant: str | None = None
+
+    requestSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="요청 스펙. {method, pathParams, queryParams, body}. "
+                    "body의 고정값 위에 chained_variables가 동적으로 덮어쓴다.",
+    )
+    expectedSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="기대 응답. {statusCode, body, errorMessage}",
+    )
+    assertionSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="검증 스펙. {statusCode, bodyContains, bodyEquals, headerContains}",
+    )
+
+    duplicate: bool = False
+
+    # === 전환기 보존 필드 ===
     expected_assertions: list[str] = Field(
         default_factory=list,
-        description="자연어 어서션 예: '응답에 userId가 포함됨'. 실제 어서션 변환은 백엔드에서.",
+        description="자연어 어서션 예: '응답에 userId가 포함됨'. "
+                    "Step 2에서 assertionSpec.bodyContains로 흡수 예정.",
     )
 
 
@@ -155,7 +195,7 @@ class ScenarioMeta(BaseModel):
     )
     estimated_risk: RiskLevel = Field(
         default=RiskLevel.MEDIUM,
-        description="이 흐름에서 문제 발생 시 영향도. 위험도 분류 Agent와 협업 시 갱신됨.",
+        description="이 시나리오에서 문제 발생 시 영향도(시나리오 단위). 값은 대문자 enum(LOW/MEDIUM/HIGH/CRITICAL).",
     )
 
 
@@ -197,7 +237,7 @@ class ScenarioGenerationRequest(BaseModel):
     api_inventory: APIInventory = Field(description="이 프로젝트의 전체 API 목록")
     existing_test_cases: list[TestCase] = Field(
         default_factory=list,
-        description="기존 단건 테스트 이력. 추천 모드에서 커버리지 분석에 사용",
+        description="기존 단건 테스트 이력. 추천 모드/중복 제거에서 사용",
     )
 
     # 옵션
@@ -220,5 +260,5 @@ class ScenarioGenerationResult(BaseModel):
 
     scenarios: list[Scenario]
     used_endpoint_ids: list[str] = Field(
-        description="시나리오에서 실제로 사용된 모든 endpoint_id (중복 제거)",
+        description="시나리오에서 실제로 사용된 모든 apiId (중복 제거)",
     )
