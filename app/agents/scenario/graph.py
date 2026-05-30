@@ -10,7 +10,8 @@
 설계 결정:
 1. build_graph(llm)이 LLM 클라이언트를 받아 노드들에 주입.
 2. dedup: 기존 테스트와 비교해 step.duplicate 플래그 세팅 (LLM 없음).
-3. 컴파일된 그래프는 모듈 레벨에서 만들지 않음 (LLM 클라이언트가 필요하므로).
+3. validator: 스키마 정합성/체이닝 경로 검증 (LLM 없음, 비파괴적 — errors에 기록만).
+4. 컴파일된 그래프는 모듈 레벨에서 만들지 않음 (LLM 클라이언트가 필요하므로).
    대신 호출 측(엔드포인트 의존성)에서 build_graph(llm).compile() 호출.
 
 구현 상태:
@@ -19,7 +20,7 @@
 - planner:       실제 구현 (Claude 호출)
 - chainer:       실제 구현 (Claude 호출)
 - dedup:         실제 구현 (기존 테스트 대비 중복 플래그)
-- validator:     stub (다음 단계)
+- validator:     실제 구현 (스키마 정합성 검증)
 """
 
 from __future__ import annotations
@@ -30,11 +31,11 @@ from app.agents.scenario.nodes._stubs import (
     intent_parser_node,
     recommender_node,
     route_after_intent,
-    validator_node,
 )
 from app.agents.scenario.nodes.chainer import make_chainer_node
 from app.agents.scenario.nodes.dedup import dedup_node
 from app.agents.scenario.nodes.planner import make_planner_node
+from app.agents.scenario.nodes.validator import validator_node
 from app.agents.scenario.state import ScenarioAgentState
 from app.llm import LLMClient
 
