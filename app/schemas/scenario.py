@@ -8,16 +8,10 @@
 2. 시나리오 메타(rationale, coverage_gap)는 시나리오 자체와 분리해서 추천 모드에서만 채움.
 3. 모든 ID는 LLM이 생성하지 않고 서버에서 발급(uuid). LLM은 step_ref로만 참조.
 
-[1단계 변경 - shared memory 호환]
-ScenarioStep을 테스트케이스 초안(TestCaseDraft)과 동일한 필드 세트로 정렬한다.
-백엔드/프론트가 시나리오 step과 testcase draft를 동일한 방식으로 파싱·저장·표시할 수 있게 함.
-단, 시나리오의 본질인 실행 순서(ref/order)와 응답 체이닝(chained_variables)은
-draft 필드 위에 '병합'해서 유지한다 (교체 아님).
-- 기존 endpoint_id -> apiId
-- 기존 name        -> title
-- 기존 static_payload / static_params      -> requestSpec(body / pathParams / queryParams)
-- 기존 expected_status_code                -> expectedSpec.statusCode / assertionSpec.statusCode
-- 기존 expected_assertions                 -> (전환기 보존 필드. Step 2에서 assertionSpec.bodyContains로 흡수 예정)
+[1단계] ScenarioStep을 testcase 초안(TestCaseDraft)과 동일한 필드 세트로 정렬
+        (shared memory 호환). 단, 실행 순서(ref/order)와 응답 체이닝(chained_variables)은 유지.
+[2단계] LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채우므로,
+        전환기 필드였던 expected_assertions 제거 (assertionSpec.bodyContains로 흡수됨).
 """
 
 from __future__ import annotations
@@ -142,7 +136,7 @@ class ScenarioStep(BaseModel):
 
     type: DraftType = Field(
         default=DraftType.HAPPY_PATH,
-        description="생성 분류 (HAPPY_PATH / VALIDATION / ... )",
+        description="생성 분류 (HAPPY_PATH / VALIDATION / FAILURE_HANDLING / EDGE_CASE / AUTHORIZATION / PERFORMANCE)",
     )
     test_case_type: TestCaseType | None = Field(
         default=None,
@@ -168,13 +162,6 @@ class ScenarioStep(BaseModel):
     )
 
     duplicate: bool = False
-
-    # === 전환기 보존 필드 ===
-    expected_assertions: list[str] = Field(
-        default_factory=list,
-        description="자연어 어서션 예: '응답에 userId가 포함됨'. "
-                    "Step 2에서 assertionSpec.bodyContains로 흡수 예정.",
-    )
 
 
 # ---------------------------------------------------------------------------
