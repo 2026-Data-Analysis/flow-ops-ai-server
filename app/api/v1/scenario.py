@@ -8,6 +8,9 @@
 1. 요청을 받아 그래프 입력 State로 변환
 2. 그래프 invoke
 3. 결과 State에서 final_scenarios 꺼내 AgentResponse로 포장
+
+[1단계 변경]
+used_endpoint_ids 집계 시 step.endpoint_id -> step.apiId.
 """
 
 from __future__ import annotations
@@ -87,14 +90,14 @@ def generate_scenarios(
             trace_id=trace_id,
         )
 
-    # 사용된 endpoint_id 집계 (중복 제거, 등장 순서 유지)
+    # 사용된 apiId 집계 (중복 제거, 등장 순서 유지)
     used: list[str] = []
     seen: set[str] = set()
     for sc in final_scenarios:
         for st in sc.steps:
-            if st.endpoint_id not in seen:
-                seen.add(st.endpoint_id)
-                used.append(st.endpoint_id)
+            if st.apiId not in seen:
+                seen.add(st.apiId)
+                used.append(st.apiId)
 
     result = ScenarioGenerationResult(
         scenarios=final_scenarios,
