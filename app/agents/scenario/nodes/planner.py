@@ -5,15 +5,11 @@
 
 LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
 
-[1단계 변경]
-LLM 출력 스키마(PlannerStep)는 그대로 두고, 조립 단계(_assemble_scenarios)에서
-새 ScenarioStep(testcase draft 호환 구조)로 변환한다.
-- endpoint_id            -> apiId
-- name                   -> title
-- static_payload         -> requestSpec.body
-- static_params          -> requestSpec.pathParams / queryParams (inventory 기준 분류)
-- expected_status_code   -> expectedSpec.statusCode / assertionSpec.statusCode
-- type                   -> 기본 HAPPY_PATH (Step 2에서 LLM이 분류하도록 확장 예정)
+[2단계 변경]
+LLM이 testcase draft와 동일한 필드(type/requestSpec/expectedSpec/assertionSpec)를
+직접 채우도록 PlannerStep 확장. 조립 단계는 ScenarioStep으로 거의 1:1 매핑.
+- requestSpec.method는 LLM 값과 무관하게 inventory 기준으로 강제 교정.
+- test_case_type은 type으로부터 DRAFT_TO_TEST_CASE_TYPE 매핑.
 """
 
 from __future__ import annotations
@@ -52,18 +48,33 @@ class PlannerStep(BaseModel):
     ref: str = Field(description="스텝 단축 식별자. 'step_1', 'step_2' 형식")
     order: int = Field(ge=1, description="실행 순서. 1부터")
     endpoint_id: str = Field(description="API Inventory에 존재하는 endpoint_id")
-    name: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름")
+    title: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름")
     description: str | None = None
-    static_payload: dict[str, Any] | None = Field(
+
+    type: DraftType = Field(
+        default=DraftType.HAPPY_PATH,
+        description="HAPPY_PATH | VALIDATION | FAILURE_HANDLING | EDGE_CASE | AUTHORIZATION | PERFORMANCE",
+    )
+    userRole: str | None = None
+    stateCondition: str | None = None
+    dataVariant: str | None = None
+
+    requestSpec: dict[str, Any] | None = Field(
         default=None,
-        description="요청 바디의 고정 값. 동적 값(이전 응답)은 여기 넣지 말 것",
+        description=(
+            "{method, pathParams, queryParams, body}. "
+            "body는 endpoint의 request_body_schema 구조의 정적 값만. "
+            "동적 값(이전 응답)은 비워둘 것 (chainer가 채움)."
+        ),
     )
-    static_params: dict[str, Any] = Field(
-        default_factory=dict,
-        description="경로/쿼리 파라미터 고정 값",
+    expectedSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="{statusCode, body, errorMessage}",
     )
-    expected_status_code: int = Field(default=200, ge=100, le=599)
-    expected_assertions: list[str] = Field(default_factory=list)
+    assertionSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="{statusCode, bodyContains, bodyEquals, headerContains}",
+    )
 
 
 class PlannerScenario(BaseModel):
@@ -161,32 +172,18 @@ def make_planner_node(llm: LLMClient):
 # ---------------------------------------------------------------------------
 
 
-def _build_request_spec(ep: APIEndpoint, step: PlannerStep) -> dict[str, Any]:
-    """PlannerStep의 static_payload / static_params를 testcase requestSpec 구조로 변환.
+def _normalize_request_spec(ep: APIEndpoint, raw: dict[str, Any] | None) -> dict[str, Any]:
+    """LLM이 만든 requestSpec을 표준 구조로 정규화.
 
-    static_params는 inventory의 parameters 정의(location)로 path/query를 분류한다.
-    parameters에 정의가 없으면 경로 템플릿('{name}') 포함 여부로 path/query를 판단.
+    - method는 LLM 값과 무관하게 inventory 기준으로 강제 (LLM이 틀려도 교정).
+    - pathParams/queryParams/body 키를 항상 존재하도록 보정.
     """
-    loc_by_name = {p.name: p.location for p in ep.parameters}
-
-    path_params: dict[str, Any] = {}
-    query_params: dict[str, Any] = {}
-    for name, value in (step.static_params or {}).items():
-        location = loc_by_name.get(name)
-        if location == "path":
-            path_params[name] = value
-        elif location == "query":
-            query_params[name] = value
-        elif "{" + name + "}" in ep.path:
-            path_params[name] = value
-        else:
-            query_params[name] = value
-
+    raw = raw or {}
     return {
         "method": ep.method.value,
-        "pathParams": path_params,
-        "queryParams": query_params,
-        "body": step.static_payload,
+        "pathParams": raw.get("pathParams") or {},
+        "queryParams": raw.get("queryParams") or {},
+        "body": raw.get("body"),
     }
 
 
@@ -197,6 +194,7 @@ def _assemble_scenarios(
     """LLM이 만든 PlannerOutput을 검증하고 진짜 Scenario 객체로 변환.
 
     검증 실패한 시나리오는 결과에서 제외하고 에러만 기록.
+    (requestSpec.body의 스키마 정합성 검증은 validator 노드(4단계) 담당)
     """
     by_id = inventory.by_id()
     valid_ids = set(by_id.keys())
@@ -238,30 +236,22 @@ def _assemble_scenarios(
         steps: list[ScenarioStep] = []
         for s in sorted_steps:
             ep = by_id[s.endpoint_id]
-            draft_type = DraftType.HAPPY_PATH  # Step 2에서 LLM 분류로 확장 예정
             steps.append(ScenarioStep(
                 ref=s.ref,
                 order=s.order,
                 chained_variables=[],  # chainer 노드가 채움
                 apiId=s.endpoint_id,
-                title=s.name,
+                title=s.title,
                 description=s.description,
-                type=draft_type,
-                test_case_type=DRAFT_TO_TEST_CASE_TYPE[draft_type],
-                requestSpec=_build_request_spec(ep, s),
-                expectedSpec={
-                    "statusCode": s.expected_status_code,
-                    "body": None,
-                    "errorMessage": None,
-                },
-                assertionSpec={
-                    "statusCode": s.expected_status_code,
-                    "bodyContains": [],
-                    "bodyEquals": {},
-                    "headerContains": {},
-                },
+                type=s.type,
+                test_case_type=DRAFT_TO_TEST_CASE_TYPE[s.type],
+                userRole=s.userRole,
+                stateCondition=s.stateCondition,
+                dataVariant=s.dataVariant,
+                requestSpec=_normalize_request_spec(ep, s.requestSpec),
+                expectedSpec=s.expectedSpec,
+                assertionSpec=s.assertionSpec,
                 duplicate=False,
-                expected_assertions=s.expected_assertions,
             ))
 
         scenarios.append(Scenario(
