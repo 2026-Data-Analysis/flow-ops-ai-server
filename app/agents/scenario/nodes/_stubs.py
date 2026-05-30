@@ -3,8 +3,8 @@
 각 노드는 실제 LLM 호출 없이 State를 통과시키는 placeholder.
 실제 구현된 노드는 _stubs.py에서 빠지고 별도 파일로 옮겨진다.
 
-현재 stub: intent_parser, recommender, validator
-실제 구현: planner.py, chainer.py
+현재 stub: intent_parser, recommender
+실제 구현: planner.py, chainer.py, dedup.py, validator.py
 """
 
 from __future__ import annotations
@@ -33,18 +33,6 @@ def recommender_node(state: ScenarioAgentState) -> dict:
     STUB: 현재는 빈 갭 리스트 반환.
     """
     return {"coverage_gaps": []}
-
-
-def validator_node(state: ScenarioAgentState) -> dict:
-    """생성 결과 검증.
-
-    - 각 step의 endpoint_id가 실제 inventory에 존재하는가
-    - chained_variables의 source_step_ref가 유효한가
-    - 순환 참조가 없는가
-
-    STUB: 현재는 검증 없이 통과.
-    """
-    return {}
 
 
 def route_after_intent(state: ScenarioAgentState) -> str:
