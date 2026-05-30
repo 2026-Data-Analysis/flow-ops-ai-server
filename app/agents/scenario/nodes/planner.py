@@ -4,6 +4,16 @@
 추천 모드: coverage_gaps의 각 갭을 user_intent처럼 사용 (향후 구현).
 
 LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
+
+[1단계 변경]
+LLM 출력 스키마(PlannerStep)는 그대로 두고, 조립 단계(_assemble_scenarios)에서
+새 ScenarioStep(testcase draft 호환 구조)로 변환한다.
+- endpoint_id            -> apiId
+- name                   -> title
+- static_payload         -> requestSpec.body
+- static_params          -> requestSpec.pathParams / queryParams (inventory 기준 분류)
+- expected_status_code   -> expectedSpec.statusCode / assertionSpec.statusCode
+- type                   -> 기본 HAPPY_PATH (Step 2에서 LLM이 분류하도록 확장 예정)
 """
 
 from __future__ import annotations
@@ -17,7 +27,10 @@ from app.agents.scenario.state import AgentError, ScenarioAgentState
 from app.llm import LLMClient
 from app.llm.prompts.scenario_planner import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import (
+    DRAFT_TO_TEST_CASE_TYPE,
+    APIEndpoint,
     APIInventory,
+    DraftType,
     Scenario,
     ScenarioGenerationMode,
     ScenarioMeta,
@@ -148,6 +161,35 @@ def make_planner_node(llm: LLMClient):
 # ---------------------------------------------------------------------------
 
 
+def _build_request_spec(ep: APIEndpoint, step: PlannerStep) -> dict[str, Any]:
+    """PlannerStep의 static_payload / static_params를 testcase requestSpec 구조로 변환.
+
+    static_params는 inventory의 parameters 정의(location)로 path/query를 분류한다.
+    parameters에 정의가 없으면 경로 템플릿('{name}') 포함 여부로 path/query를 판단.
+    """
+    loc_by_name = {p.name: p.location for p in ep.parameters}
+
+    path_params: dict[str, Any] = {}
+    query_params: dict[str, Any] = {}
+    for name, value in (step.static_params or {}).items():
+        location = loc_by_name.get(name)
+        if location == "path":
+            path_params[name] = value
+        elif location == "query":
+            query_params[name] = value
+        elif "{" + name + "}" in ep.path:
+            path_params[name] = value
+        else:
+            query_params[name] = value
+
+    return {
+        "method": ep.method.value,
+        "pathParams": path_params,
+        "queryParams": query_params,
+        "body": step.static_payload,
+    }
+
+
 def _assemble_scenarios(
     parsed: PlannerOutput,
     inventory: APIInventory,
@@ -156,11 +198,12 @@ def _assemble_scenarios(
 
     검증 실패한 시나리오는 결과에서 제외하고 에러만 기록.
     """
-    valid_ids = set(inventory.by_id().keys())
+    by_id = inventory.by_id()
+    valid_ids = set(by_id.keys())
     scenarios: list[Scenario] = []
     errors: list[AgentError] = []
 
-    for idx, ps in enumerate(parsed.scenarios):
+    for ps in parsed.scenarios:
         # ref 중복 검사
         refs = [s.ref for s in ps.steps]
         if len(refs) != len(set(refs)):
@@ -191,22 +234,36 @@ def _assemble_scenarios(
             ))
             continue
 
-        # 진짜 Scenario 객체로 변환
-        steps = [
-            ScenarioStep(
+        # 진짜 Scenario 객체로 변환 (testcase draft 호환 구조)
+        steps: list[ScenarioStep] = []
+        for s in sorted_steps:
+            ep = by_id[s.endpoint_id]
+            draft_type = DraftType.HAPPY_PATH  # Step 2에서 LLM 분류로 확장 예정
+            steps.append(ScenarioStep(
                 ref=s.ref,
                 order=s.order,
-                endpoint_id=s.endpoint_id,
-                name=s.name,
-                description=s.description,
-                static_payload=s.static_payload,
-                static_params=s.static_params,
                 chained_variables=[],  # chainer 노드가 채움
-                expected_status_code=s.expected_status_code,
+                apiId=s.endpoint_id,
+                title=s.name,
+                description=s.description,
+                type=draft_type,
+                test_case_type=DRAFT_TO_TEST_CASE_TYPE[draft_type],
+                requestSpec=_build_request_spec(ep, s),
+                expectedSpec={
+                    "statusCode": s.expected_status_code,
+                    "body": None,
+                    "errorMessage": None,
+                },
+                assertionSpec={
+                    "statusCode": s.expected_status_code,
+                    "bodyContains": [],
+                    "bodyEquals": {},
+                    "headerContains": {},
+                },
+                duplicate=False,
                 expected_assertions=s.expected_assertions,
-            )
-            for s in sorted_steps
-        ]
+            ))
+
         scenarios.append(Scenario(
             name=ps.name,
             description=ps.description,
