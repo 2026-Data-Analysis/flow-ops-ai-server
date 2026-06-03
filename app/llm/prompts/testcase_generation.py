@@ -61,6 +61,13 @@ For error cases use the appropriate status code and fill errorMessage:
 - Do NOT serialize the array as a string value.
 - Do NOT wrap any value in markdown fences (```json ... ```).
 - Do NOT include explanatory text outside the tool call.
+- Do NOT use code expressions in any JSON value.
+  Forbidden patterns: + operator, .repeat(), .concat(), ${...}, template literals,
+  or any JavaScript/Python expression.
+  If you need a boundary-value string, write it out as a literal string.
+
+  BAD:  "appId": "app-" + "a".repeat(250)
+  GOOD: "appId": "app-aaaaaaaaaaaaaaaa..."
 """
 
 

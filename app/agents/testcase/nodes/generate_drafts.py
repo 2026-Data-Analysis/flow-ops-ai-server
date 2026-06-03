@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from typing import Any
@@ -56,6 +57,13 @@ class _DraftListOutput(BaseModel):
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.DOTALL)
 
+_CODE_EXPR_RE = re.compile(
+    r'"\s*\+\s*"|'       # string concatenation: " + "
+    r'\.repeat\s*\(|'    # .repeat(
+    r'\.concat\s*\(|'    # .concat(
+    r'\$\{'              # template literal: ${
+)
+
 
 def _coerce_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     """Guard against the model returning `drafts` as a JSON string instead of an array.
@@ -69,13 +77,37 @@ def _coerce_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(drafts, str):
         return result
     cleaned = _FENCE_RE.sub("", drafts).strip()
+    if cleaned != drafts.strip():
+        logger.info(
+            "generate_drafts.fence_removed raw_prefix=%r cleaned_prefix=%r",
+            drafts.strip()[:60],
+            cleaned[:60],
+        )
     parsed = repair_json(cleaned, return_objects=True)
     if not isinstance(parsed, list):
+        logger.warning(
+            "generate_drafts.coerce_failed drafts_type=%r cleaned_prefix=%r",
+            type(parsed).__name__,
+            cleaned[:120],
+        )
         raise ValueError(
             f"LLM returned drafts as a string that could not be coerced to a list "
             f"(got {type(parsed).__name__!r} after repair). Raw value: {cleaned[:120]!r}"
         )
+    logger.info("generate_drafts.json_repaired drafts_count=%d", len(parsed))
     return {**result, "drafts": parsed}
+
+
+def _is_clean_draft(draft: dict[str, Any]) -> bool:
+    """Return False if the draft contains code-like expressions in spec fields."""
+    for field in ("requestSpec", "expectedSpec", "assertionSpec"):
+        value = draft.get(field)
+        if value is None:
+            continue
+        serialized = json.dumps(value, ensure_ascii=False)
+        if _CODE_EXPR_RE.search(serialized):
+            return False
+    return True
 
 
 async def generate_drafts(state: TestCaseAgentState) -> dict:
@@ -161,8 +193,28 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
                 result,
             )
             output = _DraftListOutput.model_validate(_coerce_tool_result(result))
+            total = len(output.drafts)
+            clean_drafts = []
             for draft in output.drafts:
-                raw_drafts.append({**draft.model_dump(), "apiId": api.apiId})
+                dumped = {**draft.model_dump(), "apiId": api.apiId}
+                if _is_clean_draft(dumped):
+                    clean_drafts.append(dumped)
+                else:
+                    logger.debug(
+                        "generate_drafts.draft_filtered requestId=%s apiId=%s title=%r",
+                        req.requestId,
+                        api.apiId,
+                        draft.title,
+                    )
+            filtered = total - len(clean_drafts)
+            if filtered:
+                logger.info(
+                    "generate_drafts.drafts_filtered requestId=%s apiId=%s drafts_filtered=%d",
+                    req.requestId,
+                    api.apiId,
+                    filtered,
+                )
+            raw_drafts.extend(clean_drafts)
         except Exception as exc:
             logger.warning(
                 "generate_drafts.llm_failed requestId=%s apiId=%s error=%s",
