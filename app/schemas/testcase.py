@@ -171,6 +171,7 @@ class TestCaseDraft(BaseModel):
     expectedSpec: dict[str, Any] | None = None
     assertionSpec: dict[str, Any] | None = None
     duplicate: bool = False
+    risk_level: str | None = None
 
 
 # ── Response ─────────────────────────────────────────────────────────────────
