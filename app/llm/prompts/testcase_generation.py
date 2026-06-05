@@ -34,6 +34,21 @@ Write title and description in Korean.
 - title example: "유효한 자격증명으로 로그인 성공"
 - description example: "올바른 이메일과 비밀번호로 로그인 시 200 응답과 토큰 반환 확인"
 
+## Negative Test Case Rules (CRITICAL)
+When generating negative/exception test cases, DO NOT hardcode invalid values directly into the API path string.
+Instead, you MUST place the invalid values in the exact parameter fields where the error occurs:
+  - Path parameter errors -> 'requestSpec.pathParams'
+  - Query parameter errors -> 'requestSpec.queryParams'
+  - Body validation errors -> 'requestSpec.body'
+  - Header/Auth errors -> 'requestSpec.headers'
+
+Example:
+  BAD:  "path": "/apps//scenarios"
+  GOOD: "path": "/apps/{{appId}}/scenarios", "requestSpec": {{"pathParams": {{"appId": ""}}}}
+
+  BAD:  "description": "잘못된 바디로 요청", requestSpec 없음
+  GOOD: "requestSpec": {{"body": {{"email": "not-an-email"}}}}
+
 ## Output Fields
 Fill every field below for each test case. Do NOT leave expectedSpec null.
 
