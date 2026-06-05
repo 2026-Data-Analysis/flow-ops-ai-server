@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from app.core.response_spec import error_status_codes, expected_status_codes
 from app.schemas import APIInventory
 
 
@@ -28,6 +29,14 @@ SYSTEM_PROMPT = """\
 4. 한 시나리오의 스텝 수는 2~8개가 적절합니다. 너무 길면 검증이 어려워집니다.
 5. 변수 전달(예: 토큰을 다음 요청에 주입) 매핑은 이 단계에서 만들지 않습니다.
    별도 단계가 이를 처리하므로, 당신은 흐름 설계와 각 스텝의 '고정 입력값' 결정에만 집중하세요.
+6. [유효 ID 확보] 정상 케이스(HAPPY_PATH/PERFORMANCE)에서 path나 body에 필요한 리소스 ID
+   (appId, userId, orderId 등)를 이 시나리오의 앞 스텝에서 만들지 않았는데, 인벤토리에 그 리소스의
+   목록/조회 엔드포인트(예: GET /apps, GET /users)가 있으면 → 그 조회 스텝을 시나리오 앞쪽에 추가하세요.
+   - 실제 ID를 응답에서 받아 다음 스텝에 넣는 '연결'은 다음 단계가 처리하므로, 당신은 '조회 스텝을
+     흐름에 넣는 것'까지만 하면 됩니다. 그 ID를 쓰는 스텝의 path에는 `{appId}` 같은 플레이스홀더를 두세요.
+   - 추측값(appId="1" 등)을 하드코딩하면 실제 실행 시 그 리소스가 없어 404가 날 수 있으니 피하세요.
+   ⚠️ 예외: 음성 케이스(VALIDATION/EDGE_CASE 등에서 일부러 없는/invalid ID로 4xx를 유도)는
+      조회 스텝을 추가하지 말고, 의도한 invalid 값을 그대로 두세요. (음성 케이스 requestSpec 규칙과 일치)
 
 각 스텝(step)이 채워야 할 필드:
 - ref: 'step_1', 'step_2'처럼 순번을 매기되 한 시나리오 안에서 유일해야 합니다.
@@ -51,6 +60,9 @@ SYSTEM_PROMPT = """\
 - expectedSpec: 기대 응답. 형식 {"statusCode", "body", "errorMessage"}.
     정상: {"statusCode": 200, "body": {...}, "errorMessage": null}
     오류: {"statusCode": 400, "body": {...}, "errorMessage": "Validation failed: ..."}
+    · statusCode 고르는 법: 정상(HAPPY_PATH/PERFORMANCE)은 그 엔드포인트의 '정상status' 중 하나,
+      음성(나머지)은 '오류status' 중 의도에 맞는 것을 쓰세요. (목록은 위 API 목록에 표기됨.
+      오류status가 없으면 일반 규칙대로 400/401/403/404/409 중 선택)
 - assertionSpec: 검증 기준. 형식 {"statusCode", "bodyContains", "bodyEquals", "headerContains"}.
     예: {"statusCode": 200, "bodyContains": ["userId"], "bodyEquals": {}, "headerContains": {}}
 
@@ -96,6 +108,11 @@ def build_user_prompt(
         path_params = [p.name for p in ep.parameters if p.location == "path"]
         if path_params:
             line += f"  path파라미터: {', '.join(path_params)}"
+        exp_codes = expected_status_codes(ep.response_schema)
+        line += f"  정상status: {exp_codes}"
+        err_codes = error_status_codes(ep.response_schema)
+        if err_codes:
+            line += f"  오류status: {err_codes}"
         if ep.tags:
             line += f"  태그: {', '.join(ep.tags)}"
         api_lines.append(line)

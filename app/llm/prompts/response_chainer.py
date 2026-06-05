@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from app.core.response_spec import success_schema
 from app.schemas import APIInventory, Scenario
 
 
@@ -84,9 +85,10 @@ def build_user_prompt(
             block.append(
                 f"  request_body_schema: {json.dumps(ep.request_body_schema, ensure_ascii=False)}"
             )
-        if ep.response_schema:
+        success = success_schema(ep.response_schema)
+        if success:
             block.append(
-                f"  response_schema: {json.dumps(ep.response_schema, ensure_ascii=False)}"
+                f"  response_schema(성공 응답): {json.dumps(success, ensure_ascii=False)}"
             )
         if step.requestSpec:
             block.append(

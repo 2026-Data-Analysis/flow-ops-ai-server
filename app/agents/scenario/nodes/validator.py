@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.scenario.state import AgentError
+from app.core.response_spec import success_schema
 from app.schemas import DraftType
 
 # body 정합성 검사를 적용할(=정상 흐름) type
@@ -169,7 +170,7 @@ def _check_source_paths(scenario, step, ref_to_step, by_id) -> list[AgentError]:
         source_ep = by_id.get(source_step.apiId)
         if source_ep is None:
             continue
-        if not _path_exists(source_ep.response_schema, cv.source_json_path):
+        if not _path_exists(success_schema(source_ep.response_schema), cv.source_json_path):
             out.append(AgentError(
                 node="validator",
                 code="INVALID_SOURCE_PATH",
