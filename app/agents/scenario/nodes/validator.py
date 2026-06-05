@@ -1,49 +1,58 @@
-"""Validator 노드.
+"""validator 노드.
 
-생성·체이닝까지 끝난 final_scenarios의 스키마 정합성을 검증한다.
-
-검증은 '비파괴적'이다 — 문제를 errors에 기록만 하고 시나리오를 제거하지 않는다.
-(엔드포인트 핸들러가 errors를 '부분 검증 실패'로 요약해 응답 error_message에 첨부.
- 시나리오가 1개라도 있으면 success=true 유지.)
+planner/chainer가 만든 시나리오를 비파괴적으로 검증한다 (LLM 미사용).
+시나리오를 수정하지 않고 문제를 errors에 기록만 한다 → success는 유지(부분 검증 실패).
 
 검사 항목:
-1. apiId가 inventory에 존재하는가 (안전망; planner가 이미 1차로 거름).
-2. requestSpec.body가 request_body_schema에 부합하는가 — **정상 흐름 step만**.
-   - HAPPY_PATH / PERFORMANCE 처럼 '유효한 요청'을 보내는 step에만 적용.
-   - VALIDATION / EDGE_CASE / FAILURE_HANDLING / AUTHORIZATION 같은 음성 테스트는
-     일부러 스키마를 위반(필드 누락/잘못된 값)하는 것이 목적이므로 검사하지 않음.
-   - required 필드 충족 — chained_variables로 body에 주입되는 필드도 '충족'으로 인정.
-   - 스키마 properties에 없는 필드(unknown)가 정적 body에 있는가.
-3. chained_variables 경로 검증 — **모든 step**.
-   - body target 필드가 request_body_schema에 존재하는가.
-   - source_json_path 최상위가 source 스텝의 response_schema에 존재하는가
-     (response_schema가 있을 때만).
+- PAYLOAD_MISSING_REQUIRED : 정상 흐름 step의 body에 required 필드 누락
+                             (단, chained_variables(body)로 채워지면 충족으로 인정)
+- PAYLOAD_UNKNOWN_FIELD    : request_body_schema에 없는 필드가 정적 body에 있음
+- INVALID_TARGET_PATH      : 체이닝 body target 필드가 request_body_schema에 없음
+- INVALID_SOURCE_PATH      : source_json_path가 source step의 response_schema에 없음
+
+적용 범위:
+- body 정합성(PAYLOAD_*, INVALID_TARGET_PATH)은 정상 흐름(HAPPY_PATH/PERFORMANCE) step에만.
+  음성 테스트(VALIDATION/EDGE_CASE/FAILURE_HANDLING/AUTHORIZATION)는 일부러 스키마를 위반하는
+  것이 목적이므로 제외 (오탐 방지).
+- INVALID_SOURCE_PATH는 step type과 무관하게 검사 (source 응답은 항상 유효해야 하므로).
 """
 
 from __future__ import annotations
 
-from app.agents.scenario.state import AgentError, ScenarioAgentState
-from app.schemas import APIEndpoint, DraftType, Scenario, ScenarioStep
+from typing import Any
 
-# 유효한 요청을 보내는(=스키마를 지켜야 하는) step 타입.
-# 그 외(VALIDATION/EDGE_CASE/FAILURE_HANDLING/AUTHORIZATION)는 일부러 위반하므로 정합성 검사 제외.
+from app.agents.scenario.state import AgentError
+from app.schemas import DraftType
+
+# body 정합성 검사를 적용할(=정상 흐름) type
 _POSITIVE_TYPES = {DraftType.HAPPY_PATH, DraftType.PERFORMANCE}
 
 
-def validator_node(state: ScenarioAgentState) -> dict:
+def validator_node(state: dict) -> dict:
     scenarios = state.get("final_scenarios", [])
     if not scenarios:
-        return {}
+        return {"errors": []}
 
-    by_id = state["request"].api_inventory.by_id()
-
+    inventory = state["request"].api_inventory
+    by_id = inventory.by_id()
     errors: list[AgentError] = []
-    for sc in scenarios:
-        ref_to_step = {st.ref: st for st in sc.steps}
-        for st in sc.steps:
-            errors.extend(_validate_step(sc, st, by_id, ref_to_step))
 
-    return {"errors": errors} if errors else {}
+    for scenario in scenarios:
+        ref_to_step = {s.ref: s for s in scenario.steps}
+
+        for step in scenario.steps:
+            ep = by_id.get(step.apiId)
+            if ep is None:
+                continue
+
+            # body 정합성 (정상 흐름 step만)
+            if step.type in _POSITIVE_TYPES:
+                errors.extend(_check_body(scenario, step, ep))
+
+            # 체이닝 source 경로 (모든 step)
+            errors.extend(_check_source_paths(scenario, step, ref_to_step, by_id))
+
+    return {"errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -51,140 +60,123 @@ def validator_node(state: ScenarioAgentState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _validate_step(
-    scenario: Scenario,
-    step: ScenarioStep,
-    by_id: dict[str, APIEndpoint],
-    ref_to_step: dict[str, ScenarioStep],
-) -> list[AgentError]:
-    ep = by_id.get(step.apiId)
-    if ep is None:
-        return [AgentError(
-            node="validator",
-            code="UNKNOWN_APIID",
-            message=f"시나리오 '{scenario.name}' step '{step.ref}': inventory에 없는 apiId '{step.apiId}'",
-        )]
-
-    errors: list[AgentError] = []
-
-    # body 정합성은 '정상 요청' step에만 (음성 테스트는 일부러 위반하므로 제외)
-    if step.type in _POSITIVE_TYPES:
-        errors.extend(_validate_body_conformance(scenario, step, ep))
-
-    # 체이닝 경로 정합성은 타입과 무관하게 항상
-    errors.extend(_validate_chaining(scenario, step, ep, by_id, ref_to_step))
-    return errors
+def _top_field(target_field: str) -> str:
+    """target_field('$.userId' / 'userId' / '$.a.b')에서 최상위 필드명 추출."""
+    f = target_field.strip()
+    if f.startswith("$"):
+        f = f[1:]
+    if f.startswith("."):
+        f = f[1:]
+    return f.split(".")[0].split("[")[0]
 
 
-def _validate_body_conformance(
-    scenario: Scenario,
-    step: ScenarioStep,
-    ep: APIEndpoint,
-) -> list[AgentError]:
+def _path_exists(schema: dict[str, Any] | None, json_path: str) -> bool:
+    """JSONPath가 JSON Schema(object/properties)에 존재하는지 best-effort 판정.
+
+    스키마 정보가 없거나(검증 불가) 배열 등 복잡 구조면 오탐 방지를 위해 True를 반환하고,
+    'properties가 명확히 있는데 키가 없는' 확정적 불일치만 False로 본다.
+    """
+    if not isinstance(schema, dict):
+        return True
+
+    path = json_path.strip()
+    if path.startswith("$"):
+        path = path[1:]
+    if path.startswith("."):
+        path = path[1:]
+    if not path:
+        return True
+
+    current: Any = schema
+    for seg in path.split("."):
+        key = seg.split("[")[0]
+        if not key:
+            continue
+        if not isinstance(current, dict):
+            return True  # 더 내려갈 수 없음 → 검증 보류(통과)
+        props = current.get("properties")
+        if not isinstance(props, dict):
+            return True  # properties 정보 없음 → 검증 보류(통과)
+        if key not in props:
+            return False  # 확정적 불일치
+        current = props[key]
+        # 배열이면 items로 한 단계 내려감
+        if isinstance(current, dict) and current.get("type") == "array":
+            items = current.get("items")
+            if isinstance(items, dict):
+                current = items
+    return True
+
+
+def _check_body(scenario, step, ep) -> list[AgentError]:
+    out: list[AgentError] = []
     schema = ep.request_body_schema
-    if not isinstance(schema, dict) or schema.get("type") != "object":
-        return []  # 검증할 object 스키마가 없음
+    if not isinstance(schema, dict):
+        return out
 
     props = schema.get("properties") or {}
     required = schema.get("required") or []
+    body = (step.requestSpec or {}).get("body") or {}
 
-    static_body = (step.requestSpec or {}).get("body")
-    static_keys = set(static_body.keys()) if isinstance(static_body, dict) else set()
-    chained_body_fields = _chained_body_fields(step)
-    present = static_keys | chained_body_fields
+    # 정적 body + body로 주입되는 체이닝 필드 = '제공된' 필드
+    provided = set(body.keys())
+    for cv in step.chained_variables:
+        if cv.target_location == "body":
+            provided.add(_top_field(cv.target_field))
 
-    errors: list[AgentError] = []
-
-    # required 충족 (체이닝으로 채워지는 필드도 충족으로 인정 — 핵심)
-    missing = [r for r in required if r not in present]
+    # PAYLOAD_MISSING_REQUIRED
+    missing = [r for r in required if r not in provided]
     if missing:
-        errors.append(AgentError(
+        out.append(AgentError(
             node="validator",
             code="PAYLOAD_MISSING_REQUIRED",
-            message=f"시나리오 '{scenario.name}' step '{step.ref}': 필수 필드 누락 {missing} (apiId={step.apiId})",
+            message=f"시나리오 '{scenario.name}' step '{step.ref}': required 누락 {missing}",
         ))
 
-    # 스키마에 없는 필드 (정적 body 기준)
     if props:
-        unknown = sorted(k for k in static_keys if k not in props)
+        # PAYLOAD_UNKNOWN_FIELD
+        unknown = [k for k in body.keys() if k not in props]
         if unknown:
-            errors.append(AgentError(
+            out.append(AgentError(
                 node="validator",
                 code="PAYLOAD_UNKNOWN_FIELD",
-                message=f"시나리오 '{scenario.name}' step '{step.ref}': 스키마에 없는 필드 {unknown} (apiId={step.apiId})",
+                message=f"시나리오 '{scenario.name}' step '{step.ref}': 스키마에 없는 필드 {unknown}",
             ))
 
-    return errors
-
-
-def _validate_chaining(
-    scenario: Scenario,
-    step: ScenarioStep,
-    ep: APIEndpoint,
-    by_id: dict[str, APIEndpoint],
-    ref_to_step: dict[str, ScenarioStep],
-) -> list[AgentError]:
-    errors: list[AgentError] = []
-
-    schema = ep.request_body_schema
-    props = schema.get("properties") if isinstance(schema, dict) else None
-
-    for cv in step.chained_variables:
-        # body target이 request_body_schema에 존재하는가 (스키마 있을 때만)
-        if props and cv.target_location == "body" and cv.target_field:
-            top = _top_level_field(cv.target_field)
-            if top and top not in props:
-                errors.append(AgentError(
+        # INVALID_TARGET_PATH (body로 주입되는 체이닝의 대상 필드)
+        for cv in step.chained_variables:
+            if cv.target_location == "body" and _top_field(cv.target_field) not in props:
+                out.append(AgentError(
                     node="validator",
                     code="INVALID_TARGET_PATH",
                     message=(
                         f"시나리오 '{scenario.name}' step '{step.ref}': "
-                        f"체이닝 target '{cv.target_field}'가 스키마에 없음 (apiId={step.apiId})"
+                        f"체이닝 target '{cv.target_field}'가 request_body_schema에 없음"
                     ),
                 ))
 
-        # source_json_path가 source 스텝 응답 스키마에 존재하는가
-        if cv.source_step_ref and cv.source_json_path:
-            src_step = ref_to_step.get(cv.source_step_ref)
-            if src_step is None:
-                continue  # chainer가 이미 검증
-            src_ep = by_id.get(src_step.apiId)
-            if src_ep is None or not isinstance(src_ep.response_schema, dict):
-                continue  # 응답 스키마 없으면 검증 불가 → skip
-            resp_props = src_ep.response_schema.get("properties") or {}
-            if not resp_props:
-                continue
-            top = _top_level_field(cv.source_json_path)
-            if top and top not in resp_props:
-                errors.append(AgentError(
-                    node="validator",
-                    code="INVALID_SOURCE_PATH",
-                    message=(
-                        f"시나리오 '{scenario.name}' step '{step.ref}': "
-                        f"source_json_path '{cv.source_json_path}'가 "
-                        f"'{cv.source_step_ref}'({src_step.apiId}) 응답 스키마에 없음"
-                    ),
-                ))
-
-    return errors
+    return out
 
 
-def _chained_body_fields(step: ScenarioStep) -> set[str]:
-    """chained_variables 중 body에 주입되는 최상위 필드 집합."""
-    return {
-        _top_level_field(cv.target_field)
-        for cv in step.chained_variables
-        if cv.target_location == "body" and cv.target_field
-    }
-
-
-def _top_level_field(path: str) -> str:
-    """JSONPath에서 최상위 필드명만 추출.
-
-    예: '$.userId' -> 'userId', '$.items[0].productId' -> 'items', 'userId' -> 'userId'
-    """
-    p = path.lstrip("$").lstrip(".")
-    for i, ch in enumerate(p):
-        if ch in ".[":
-            return p[:i]
-    return p
+def _check_source_paths(scenario, step, ref_to_step, by_id) -> list[AgentError]:
+    out: list[AgentError] = []
+    for cv in step.chained_variables:
+        if not cv.source_json_path or not cv.source_step_ref:
+            continue
+        source_step = ref_to_step.get(cv.source_step_ref)
+        if source_step is None:
+            continue  # 알 수 없는 ref는 chainer가 이미 처리
+        source_ep = by_id.get(source_step.apiId)
+        if source_ep is None:
+            continue
+        if not _path_exists(source_ep.response_schema, cv.source_json_path):
+            out.append(AgentError(
+                node="validator",
+                code="INVALID_SOURCE_PATH",
+                message=(
+                    f"시나리오 '{scenario.name}' step '{step.ref}': "
+                    f"source_json_path '{cv.source_json_path}'가 "
+                    f"'{cv.source_step_ref}' 응답 스키마에 없음"
+                ),
+            ))
+    return out
