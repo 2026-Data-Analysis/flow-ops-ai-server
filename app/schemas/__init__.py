@@ -2,7 +2,7 @@
 
 외부 모듈은 `from app.schemas import Scenario, ...` 형태로 임포트한다.
 """
-
+from .testcase import DraftType, TestCaseType, DRAFT_TO_TEST_CASE_TYPE, TestCase
 from .api_spec import APIEndpoint, APIInventory, AuthScheme, ParameterSpec
 from .common import AgentResponse, HttpMethod, RiskLevel, TokenUsage
 from .scenario import (

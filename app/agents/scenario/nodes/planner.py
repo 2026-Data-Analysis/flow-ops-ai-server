@@ -5,11 +5,12 @@
 
 LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
 
-[2단계 변경]
-LLM이 testcase draft와 동일한 필드(type/requestSpec/expectedSpec/assertionSpec)를
-직접 채우도록 PlannerStep 확장. 조립 단계는 ScenarioStep으로 거의 1:1 매핑.
-- requestSpec.method는 LLM 값과 무관하게 inventory 기준으로 강제 교정.
-- test_case_type은 type으로부터 DRAFT_TO_TEST_CASE_TYPE 매핑.
+스키마 변경 반영:
+- ScenarioStep이 TestCaseDraft 호환 구조로 바뀜.
+  endpoint_id→apiId, name→title, static_payload/static_params→requestSpec,
+  expected_status_code/expected_assertions→expectedSpec/assertionSpec.
+- LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채운다.
+- test_case_type은 DRAFT_TO_TEST_CASE_TYPE 매핑으로 서버가 채운다(LLM 입력 아님).
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from app.llm import LLMClient
 from app.llm.prompts.scenario_planner import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import (
     DRAFT_TO_TEST_CASE_TYPE,
-    APIEndpoint,
     APIInventory,
     DraftType,
     Scenario,
@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LLM 출력 전용 스키마
 # ---------------------------------------------------------------------------
-# 우리의 Scenario 스키마에는 step_id(uuid), scenario_id(uuid) 같은 서버 발급 필드가 있음.
+# 우리의 Scenario 스키마에는 step_id(uuid), scenario_id(uuid) 같은 서버 발급 필드와
+# test_case_type(매핑 파생값), chained_variables(chainer가 채움)가 있음.
 # LLM에게 이런 걸 만들게 하면 토큰 낭비 + 형식 오류 위험.
 # LLM 출력용 슬림 스키마를 별도로 정의하고, 우리 코드가 진짜 객체로 조립한다.
 
@@ -47,33 +48,31 @@ logger = logging.getLogger(__name__)
 class PlannerStep(BaseModel):
     ref: str = Field(description="스텝 단축 식별자. 'step_1', 'step_2' 형식")
     order: int = Field(ge=1, description="실행 순서. 1부터")
-    endpoint_id: str = Field(description="API Inventory에 존재하는 endpoint_id")
+    apiId: str = Field(description="API Inventory에 존재하는 endpoint_id")
     title: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름")
     description: str | None = None
 
     type: DraftType = Field(
         default=DraftType.HAPPY_PATH,
-        description="HAPPY_PATH | VALIDATION | FAILURE_HANDLING | EDGE_CASE | AUTHORIZATION | PERFORMANCE",
+        description="HAPPY_PATH / VALIDATION / FAILURE_HANDLING / EDGE_CASE / AUTHORIZATION / PERFORMANCE",
     )
+
     userRole: str | None = None
     stateCondition: str | None = None
     dataVariant: str | None = None
 
     requestSpec: dict[str, Any] | None = Field(
         default=None,
-        description=(
-            "{method, pathParams, queryParams, body}. "
-            "body는 endpoint의 request_body_schema 구조의 정적 값만. "
-            "동적 값(이전 응답)은 비워둘 것 (chainer가 채움)."
-        ),
+        description="요청 스펙 {method, pathParams, queryParams, body}. "
+                    "고정값만. 이전 응답에서 받아올 동적값은 넣지 말 것(chainer가 처리)",
     )
     expectedSpec: dict[str, Any] | None = Field(
         default=None,
-        description="{statusCode, body, errorMessage}",
+        description="기대 응답 {statusCode, body, errorMessage}",
     )
     assertionSpec: dict[str, Any] | None = Field(
         default=None,
-        description="{statusCode, bodyContains, bodyEquals, headerContains}",
+        description="검증 스펙 {statusCode, bodyContains, bodyEquals, headerContains}",
     )
 
 
@@ -155,7 +154,7 @@ def make_planner_node(llm: LLMClient):
                 "token_usages": [usage],
             }
 
-        # endpoint_id, ref 검증 + Scenario 조립
+        # apiId, ref 검증 + Scenario 조립
         scenarios, errs = _assemble_scenarios(parsed, inventory)
 
         return {
@@ -172,21 +171,6 @@ def make_planner_node(llm: LLMClient):
 # ---------------------------------------------------------------------------
 
 
-def _normalize_request_spec(ep: APIEndpoint, raw: dict[str, Any] | None) -> dict[str, Any]:
-    """LLM이 만든 requestSpec을 표준 구조로 정규화.
-
-    - method는 LLM 값과 무관하게 inventory 기준으로 강제 (LLM이 틀려도 교정).
-    - pathParams/queryParams/body 키를 항상 존재하도록 보정.
-    """
-    raw = raw or {}
-    return {
-        "method": ep.method.value,
-        "pathParams": raw.get("pathParams") or {},
-        "queryParams": raw.get("queryParams") or {},
-        "body": raw.get("body"),
-    }
-
-
 def _assemble_scenarios(
     parsed: PlannerOutput,
     inventory: APIInventory,
@@ -194,10 +178,8 @@ def _assemble_scenarios(
     """LLM이 만든 PlannerOutput을 검증하고 진짜 Scenario 객체로 변환.
 
     검증 실패한 시나리오는 결과에서 제외하고 에러만 기록.
-    (requestSpec.body의 스키마 정합성 검증은 validator 노드(4단계) 담당)
     """
-    by_id = inventory.by_id()
-    valid_ids = set(by_id.keys())
+    valid_ids = set(inventory.by_id().keys())
     scenarios: list[Scenario] = []
     errors: list[AgentError] = []
 
@@ -212,8 +194,8 @@ def _assemble_scenarios(
             ))
             continue
 
-        # endpoint_id 존재 확인
-        bad_ids = [s.endpoint_id for s in ps.steps if s.endpoint_id not in valid_ids]
+        # apiId 존재 확인
+        bad_ids = [s.apiId for s in ps.steps if s.apiId not in valid_ids]
         if bad_ids:
             errors.append(AgentError(
                 node="planner",
@@ -232,28 +214,27 @@ def _assemble_scenarios(
             ))
             continue
 
-        # 진짜 Scenario 객체로 변환 (testcase draft 호환 구조)
-        steps: list[ScenarioStep] = []
-        for s in sorted_steps:
-            ep = by_id[s.endpoint_id]
-            steps.append(ScenarioStep(
+        # 진짜 Scenario 객체로 변환
+        steps = [
+            ScenarioStep(
                 ref=s.ref,
                 order=s.order,
                 chained_variables=[],  # chainer 노드가 채움
-                apiId=s.endpoint_id,
+                apiId=s.apiId,
                 title=s.title,
                 description=s.description,
                 type=s.type,
-                test_case_type=DRAFT_TO_TEST_CASE_TYPE[s.type],
+                # 매핑 파생값. 응답에 노출하지 않으려면 직렬화 시 exclude.
+                test_case_type=DRAFT_TO_TEST_CASE_TYPE.get(s.type),
                 userRole=s.userRole,
                 stateCondition=s.stateCondition,
                 dataVariant=s.dataVariant,
-                requestSpec=_normalize_request_spec(ep, s.requestSpec),
+                requestSpec=s.requestSpec,
                 expectedSpec=s.expectedSpec,
                 assertionSpec=s.assertionSpec,
-                duplicate=False,
-            ))
-
+            )
+            for s in sorted_steps
+        ]
         scenarios.append(Scenario(
             name=ps.name,
             description=ps.description,
