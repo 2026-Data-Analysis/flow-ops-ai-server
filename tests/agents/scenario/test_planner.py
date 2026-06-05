@@ -154,3 +154,43 @@ def test_planner_duplicate_ref(request_nl, fake_llm):
     out = make_planner_node(fake_llm(payload))(initial_state(request_nl, trace_id="t"))
     assert out["planned_scenarios"] == []
     assert any(e["code"] == "DUPLICATE_STEP_REF" for e in out["errors"])
+
+
+def test_planner_negative_case_request_spec_preserved(request_nl, fake_llm):
+    """음성(VALIDATION) 케이스의 invalid 값이 requestSpec의 정확한 위치에 그대로 실린다.
+
+    회의 지적사항(설명에만 '빈 appId'라 쓰고 path는 정상값으로 남는 문제) 방지:
+    조립 파이프라인이 requestSpec의 pathParams/headers를 손실 없이 보존하는지 검증.
+    """
+    payload = {
+        "scenarios": [
+            {
+                "name": "빈 appId 경로 검증",
+                "rationale": "path 파라미터 음성 케이스",
+                "steps": [
+                    {
+                        "ref": "step_1",
+                        "order": 1,
+                        "apiId": "POST:/api/v1/orders",
+                        "title": "빈 appId 경로로 요청 시 400",
+                        "type": "VALIDATION",
+                        "requestSpec": {
+                            "method": "POST",
+                            "pathParams": {"appId": ""},   # invalid 값이 실행 스펙에 반영
+                            "queryParams": {},
+                            "body": None,
+                            "headers": {"Authorization": ""},
+                        },
+                        "expectedSpec": {"statusCode": 400, "body": {}, "errorMessage": None},
+                    }
+                ],
+            }
+        ]
+    }
+    out = make_planner_node(fake_llm(payload))(initial_state(request_nl, trace_id="t"))
+    step = out["planned_scenarios"][0].steps[0]
+    assert step.type == DraftType.VALIDATION
+    # invalid path param이 설명이 아니라 실행 requestSpec에 들어 있어야 함
+    assert step.requestSpec["pathParams"]["appId"] == ""
+    # 인증 음성 케이스의 헤더도 보존
+    assert step.requestSpec["headers"]["Authorization"] == ""
