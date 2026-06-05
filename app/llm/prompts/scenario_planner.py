@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from app.core.response_spec import error_status_codes, expected_status_codes
 from app.schemas import APIInventory
 
 
@@ -51,6 +52,9 @@ SYSTEM_PROMPT = """\
 - expectedSpec: 기대 응답. 형식 {"statusCode", "body", "errorMessage"}.
     정상: {"statusCode": 200, "body": {...}, "errorMessage": null}
     오류: {"statusCode": 400, "body": {...}, "errorMessage": "Validation failed: ..."}
+    · statusCode 고르는 법: 정상(HAPPY_PATH/PERFORMANCE)은 그 엔드포인트의 '정상status' 중 하나,
+      음성(나머지)은 '오류status' 중 의도에 맞는 것을 쓰세요. (목록은 위 API 목록에 표기됨.
+      오류status가 없으면 일반 규칙대로 400/401/403/404/409 중 선택)
 - assertionSpec: 검증 기준. 형식 {"statusCode", "bodyContains", "bodyEquals", "headerContains"}.
     예: {"statusCode": 200, "bodyContains": ["userId"], "bodyEquals": {}, "headerContains": {}}
 
@@ -96,6 +100,11 @@ def build_user_prompt(
         path_params = [p.name for p in ep.parameters if p.location == "path"]
         if path_params:
             line += f"  path파라미터: {', '.join(path_params)}"
+        exp_codes = expected_status_codes(ep.response_schema)
+        line += f"  정상status: {exp_codes}"
+        err_codes = error_status_codes(ep.response_schema)
+        if err_codes:
+            line += f"  오류status: {err_codes}"
         if ep.tags:
             line += f"  태그: {', '.join(ep.tags)}"
         api_lines.append(line)
