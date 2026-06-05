@@ -99,6 +99,15 @@ class GenerationContext(BaseModel):
     currentCoverage: float
     targetCoverage: float
     contextSummary: str | None = None
+    # ▼ 오케스트레이터 연동을 위해 새로 뚫어두는 바구니 2개 ▼
+    userInstruction: str | None = Field(
+        default=None, 
+        description="사용자가 직접 입력한 자연어 요구사항 (예: '장바구니 결제 테스트해줘')"
+    )
+    validIdentifiers: dict[str, list[Any]] | None = Field(
+        default=None,
+        description="DB에 존재하는 실제 유효값 샘플 (예: {'appId': ['app-1', 'app-2']})"
+    )
 
 
 class ExpandedResponse(BaseModel):

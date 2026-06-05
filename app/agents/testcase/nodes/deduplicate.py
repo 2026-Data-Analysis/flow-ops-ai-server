@@ -1,3 +1,5 @@
+import logging
+
 from app.agents.testcase.state import TestCaseAgentState
 from app.schemas.testcase import (
     DraftType,
@@ -5,6 +7,8 @@ from app.schemas.testcase import (
     ExistingTestCase,
     TestCaseDraft,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _fingerprint(api_id: str, draft_type: str, request_spec: dict | None) -> frozenset:
@@ -35,12 +39,21 @@ async def deduplicate(state: TestCaseAgentState) -> dict:
         return state
 
     seen = _existing_fingerprints(state["request"].existingTestCases)
+    valid_api_ids = {api.apiId for api in state["request"].apis}
     drafts: list[TestCaseDraft] = []
 
     for raw in state["raw_drafts"]:
         try:
             draft_type_str = raw.get("type", "HAPPY_PATH")
             draft_type = DraftType(draft_type_str)
+
+            if raw.get("apiId") not in valid_api_ids:
+                logger.debug(
+                    "deduplicate.invalid_api_id_dropped apiId=%r",
+                    raw.get("apiId"),
+                )
+                continue
+
             fp = _fingerprint(
                 api_id=raw.get("apiId", ""),
                 draft_type=draft_type_str,
