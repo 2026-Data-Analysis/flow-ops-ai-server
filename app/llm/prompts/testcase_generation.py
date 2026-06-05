@@ -19,6 +19,12 @@ Generate test cases for the following API endpoint.
 - App: {app_name}
 - Environment: {env_name} ({base_url})
 - Additional Context: {context_summary}
+- Valid Identifiers: {valid_identifiers}
+- User Instruction: {user_instruction}
+
+## Specific Instructions (Highest Priority)
+1. User Instruction: If a 'User Instruction' is provided above, you MUST generate test cases that explicitly fulfill this natural language scenario.
+2. Valid Identifiers: If 'Valid Identifiers' are provided, you MUST use these exact real values for path parameters, query parameters, or body fields when generating HAPPY_PATH or positive test cases. Do not invent fake IDs if real ones are provided.
 
 ## Requirements
 Generate 5-8 test cases. Use only these type values:
@@ -97,16 +103,28 @@ def build_generation_prompt(
     env_name: str,
     base_url: str,
     context_summary: str | None,
+    # ▼ 추가된 파라미터 ▼
+    user_instruction: str | None = None,
+    valid_identifiers: dict | None = None,
 ) -> str:
+    req_schema_str = json.dumps(request_schema, ensure_ascii=False, indent=2) if request_schema else "{}"
+    res_schema_str = json.dumps(response_schema, ensure_ascii=False, indent=2) if response_schema else "{}"
+    
+    # 파이썬 딕셔너리를 예쁜 JSON 문자열로 변환 (없으면 빈 텍스트)
+    valid_ids_str = json.dumps(valid_identifiers, ensure_ascii=False) if valid_identifiers else "None"
+
     return GENERATION_PROMPT_TEMPLATE.format(
         api_id=api_id,
         method=method.upper(),
         path=path,
         auth_required=auth_required,
-        request_schema=request_schema or {},
-        response_schema=response_schema or {},
+        request_schema=req_schema_str,
+        response_schema=res_schema_str,
         app_name=app_name,
         env_name=env_name,
         base_url=base_url,
         context_summary=context_summary or "No additional context provided.",
+        # ▼ 템플릿에 매핑 ▼
+        user_instruction=user_instruction or "None",
+        valid_identifiers=valid_ids_str,
     )

@@ -156,6 +156,7 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             env_name=env.name,
             base_url=env.baseUrl,
             context_summary=ctx.contextSummary,
+            user_instruction=ctx.userInstruction,
         )
 
         logger.debug(
