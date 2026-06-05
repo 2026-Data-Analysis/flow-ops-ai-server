@@ -2,9 +2,12 @@
 
 스키마 리팩터(endpoint_id→apiId, name→title, type/requestSpec 등) 이후
 - 새 필드로 올바르게 조립되는지
-- type → test_case_type 매핑이 채워지는지
+- 제거된 필드(test_case_type, endpoint_id, static_payload 등)가 더 이상 없는지
 - 기존 검증(미존재 endpoint / ref 중복 / order 불연속 / user_intent 누락)이 유지되는지
-를 확인한다."""
+를 확인한다.
+
+배치 위치: tests/agents/scenario/test_planner.py
+"""
 
 from __future__ import annotations
 
@@ -14,7 +17,6 @@ from app.schemas import (
     DraftType,
     ScenarioGenerationMode,
     ScenarioGenerationRequest,
-    TestCaseType,
 )
 
 
@@ -73,8 +75,8 @@ def test_planner_assembles_new_fields(request_nl, fake_llm):
     assert s1.apiId == "POST:/api/v1/auth/signup"
     assert s1.title == "회원가입"
     assert s1.type == DraftType.HAPPY_PATH
-    # type → test_case_type 매핑 (HAPPY_PATH → NORMAL)
-    assert s1.test_case_type == TestCaseType.NORMAL
+    # test_case_type 필드는 제거됨 (현서 피드백 반영)
+    assert not hasattr(s1, "test_case_type")
     # requestSpec 보존, chainer 자리(chained_variables)는 비어 있어야 함
     assert s1.requestSpec["body"]["email"] == "a@b.com"
     assert s1.chained_variables == []

@@ -10,7 +10,6 @@ LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
   endpoint_id→apiId, name→title, static_payload/static_params→requestSpec,
   expected_status_code/expected_assertions→expectedSpec/assertionSpec.
 - LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채운다.
-- test_case_type은 DRAFT_TO_TEST_CASE_TYPE 매핑으로 서버가 채운다(LLM 입력 아님).
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from app.agents.scenario.state import AgentError, ScenarioAgentState
 from app.llm import LLMClient
 from app.llm.prompts.scenario_planner import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import (
-    DRAFT_TO_TEST_CASE_TYPE,
     APIInventory,
     DraftType,
     Scenario,
@@ -40,7 +38,7 @@ logger = logging.getLogger(__name__)
 # LLM 출력 전용 스키마
 # ---------------------------------------------------------------------------
 # 우리의 Scenario 스키마에는 step_id(uuid), scenario_id(uuid) 같은 서버 발급 필드와
-# test_case_type(매핑 파생값), chained_variables(chainer가 채움)가 있음.
+# chained_variables(chainer가 채움)가 있음.
 # LLM에게 이런 걸 만들게 하면 토큰 낭비 + 형식 오류 위험.
 # LLM 출력용 슬림 스키마를 별도로 정의하고, 우리 코드가 진짜 객체로 조립한다.
 
@@ -224,8 +222,6 @@ def _assemble_scenarios(
                 title=s.title,
                 description=s.description,
                 type=s.type,
-                # 매핑 파생값. 응답에 노출하지 않으려면 직렬화 시 exclude.
-                test_case_type=DRAFT_TO_TEST_CASE_TYPE.get(s.type),
                 userRole=s.userRole,
                 stateCondition=s.stateCondition,
                 dataVariant=s.dataVariant,

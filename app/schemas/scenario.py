@@ -12,6 +12,9 @@
         (shared memory 호환). 단, 실행 순서(ref/order)와 응답 체이닝(chained_variables)은 유지.
 [2단계] LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채우므로,
         전환기 필드였던 expected_assertions 제거 (assertionSpec.bodyContains로 흡수됨).
+[3단계] test_case_type(NORMAL/EXCEPTION/BOUNDARY 매핑값) 제거.
+        위험도 분류가 아니라 type(DraftType)의 단순 파생값이라 응답에 불필요 (현서 피드백 반영).
+        NORMAL/EXCEPTION/BOUNDARY가 필요하면 호출 측에서 DRAFT_TO_TEST_CASE_TYPE로 매핑.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from .api_spec import APIInventory
 from .common import RiskLevel
-from .testcase import DraftType, TestCase, TestCaseType
+from .testcase import DraftType, TestCase
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +115,7 @@ class ScenarioStep(BaseModel):
     필드 구성:
     - 시나리오 고유: step_id, ref, order, chained_variables
       (실행 순서와 응답 체이닝 — 시나리오의 본질이므로 유지)
-    - testcase draft 호환: apiId, title, description, type, test_case_type,
+    - testcase draft 호환: apiId, title, description, type,
       userRole, stateCondition, dataVariant, requestSpec, expectedSpec,
       assertionSpec, duplicate
       (TestCaseDraft와 동일 구조로 shared memory에서 동일하게 파싱·저장)
@@ -137,10 +140,6 @@ class ScenarioStep(BaseModel):
     type: DraftType = Field(
         default=DraftType.HAPPY_PATH,
         description="생성 분류 (HAPPY_PATH / VALIDATION / FAILURE_HANDLING / EDGE_CASE / AUTHORIZATION / PERFORMANCE)",
-    )
-    test_case_type: TestCaseType | None = Field(
-        default=None,
-        description="DRAFT_TO_TEST_CASE_TYPE 매핑 결과 (NORMAL / EXCEPTION / BOUNDARY)",
     )
 
     userRole: str | None = None
@@ -182,7 +181,8 @@ class ScenarioMeta(BaseModel):
     )
     estimated_risk: RiskLevel = Field(
         default=RiskLevel.MEDIUM,
-        description="이 시나리오에서 문제 발생 시 영향도(시나리오 단위). 값은 대문자 enum(LOW/MEDIUM/HIGH/CRITICAL).",
+        description="이 시나리오에서 문제 발생 시 영향도(시나리오 단위). 값은 대문자 enum(LOW/MEDIUM/HIGH/CRITICAL). "
+                    "risk 노드가 app/core/risk.py의 공용 assess_risk로 산정.",
     )
 
 
