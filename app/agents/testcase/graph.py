@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, END
 
 from app.agents.testcase.state import TestCaseAgentState
 from app.agents.testcase.nodes import parse_request, generate_drafts, deduplicate
+from app.agents.testcase.nodes.risk import risk_node
 from app.llm import LLMClient
 from app.schemas.testcase import TestCaseGenerationRequest, TestCaseGenerationResponse
 
@@ -16,11 +17,13 @@ def build_graph(llm: LLMClient) -> StateGraph:
     graph.add_node("parse", parse_request)
     graph.add_node("generate", generate_drafts)
     graph.add_node("dedup", deduplicate)
+    graph.add_node("risk", risk_node)
 
     graph.set_entry_point("parse")
     graph.add_conditional_edges("parse", _has_error, {"end": END, "generate": "generate"})
     graph.add_edge("generate", "dedup")
-    graph.add_edge("dedup", END)
+    graph.add_edge("dedup", "risk")
+    graph.add_edge("risk", END)
 
     return graph
 

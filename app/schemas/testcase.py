@@ -101,6 +101,19 @@ class GenerationContext(BaseModel):
     contextSummary: str | None = None
 
 
+class ExpandedResponse(BaseModel):
+    statusCode: str
+    category: str
+    description: str
+    schema_obj: dict[str, Any] | None = Field(default=None, alias="schema")
+    sampleBody: Any | None = None
+
+class ExpandedResponseSchema(BaseModel):
+    expectedStatusCodes: list[int] = Field(default_factory=list)
+    errorStatusCodes: list[int] = Field(default_factory=list)
+    responses: list[ExpandedResponse] = Field(default_factory=list)
+
+
 class ApiSpec(BaseModel):
     """Backend(Spring Boot)가 보내는 API 명세. camelCase 컨벤션 유지."""
 
@@ -109,7 +122,8 @@ class ApiSpec(BaseModel):
     path: str
     domainTag: str | None = None
     requestSchema: dict[str, Any] | None = None
-    responseSchema: dict[str, Any] | None = None
+    # 기존 단일 dict와 신규 ExpandedResponseSchema를 모두 허용 (Backward Compatibility)
+    responseSchema: dict[str, Any] | ExpandedResponseSchema | None = None
     authRequired: bool = False
     deprecated: bool = False
 
@@ -171,6 +185,7 @@ class TestCaseDraft(BaseModel):
     expectedSpec: dict[str, Any] | None = None
     assertionSpec: dict[str, Any] | None = None
     duplicate: bool = False
+    risk_level: str | None = None
 
 
 # ── Response ─────────────────────────────────────────────────────────────────
