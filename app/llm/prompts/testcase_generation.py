@@ -34,6 +34,21 @@ Write title and description in Korean.
 - title example: "유효한 자격증명으로 로그인 성공"
 - description example: "올바른 이메일과 비밀번호로 로그인 시 200 응답과 토큰 반환 확인"
 
+## Negative Test Case Rules (CRITICAL)
+When generating negative/exception test cases, DO NOT hardcode invalid values directly into the API path string.
+Instead, you MUST place the invalid values in the exact parameter fields where the error occurs:
+  - Path parameter errors -> 'requestSpec.pathParams'
+  - Query parameter errors -> 'requestSpec.queryParams'
+  - Body validation errors -> 'requestSpec.body'
+  - Header/Auth errors -> 'requestSpec.headers'
+
+Example:
+  BAD:  "path": "/apps//scenarios"
+  GOOD: "path": "/apps/{{appId}}/scenarios", "requestSpec": {{"pathParams": {{"appId": ""}}}}
+
+  BAD:  "description": "잘못된 바디로 요청", requestSpec 없음
+  GOOD: "requestSpec": {{"body": {{"email": "not-an-email"}}}}
+
 ## Output Fields
 Fill every field below for each test case. Do NOT leave expectedSpec null.
 
@@ -61,6 +76,13 @@ For error cases use the appropriate status code and fill errorMessage:
 - Do NOT serialize the array as a string value.
 - Do NOT wrap any value in markdown fences (```json ... ```).
 - Do NOT include explanatory text outside the tool call.
+- Do NOT use code expressions in any JSON value.
+  Forbidden patterns: + operator, .repeat(), .concat(), ${...}, template literals,
+  or any JavaScript/Python expression.
+  If you need a boundary-value string, write it out as a literal string.
+
+  BAD:  "appId": "app-" + "a".repeat(250)
+  GOOD: "appId": "app-aaaaaaaaaaaaaaaa..."
 """
 
 
