@@ -176,6 +176,7 @@ def test_planner_negative_case_request_spec_preserved(request_nl, fake_llm):
                         "type": "VALIDATION",
                         "requestSpec": {
                             "method": "POST",
+                            "path": "/apps//scenarios",     # invalid 경로가 실제 path에 반영
                             "pathParams": {"appId": ""},   # invalid 값이 실행 스펙에 반영
                             "queryParams": {},
                             "body": None,
@@ -190,7 +191,9 @@ def test_planner_negative_case_request_spec_preserved(request_nl, fake_llm):
     out = make_planner_node(fake_llm(payload))(initial_state(request_nl, trace_id="t"))
     step = out["planned_scenarios"][0].steps[0]
     assert step.type == DraftType.VALIDATION
-    # invalid path param이 설명이 아니라 실행 requestSpec에 들어 있어야 함
+    # invalid 값이 설명이 아니라 실행 requestSpec에 들어 있어야 함
     assert step.requestSpec["pathParams"]["appId"] == ""
+    # 백엔드가 그대로 호출하는 path에도 invalid가 반영돼야 함 (정상값 /apps/1/... 이면 안 됨)
+    assert step.requestSpec["path"] == "/apps//scenarios"
     # 인증 음성 케이스의 헤더도 보존
     assert step.requestSpec["headers"]["Authorization"] == ""
