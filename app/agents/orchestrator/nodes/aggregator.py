@@ -15,6 +15,10 @@ _AGENT_LABELS = {
     "testcase": "테스트 케이스 생성",
     "scenario": "시나리오(E2E) 테스트 생성",
     "incident": "장애 원인 분석",
+    "general": "일반 질문 답변",
+    "application": "Application 관리",    
+    "environment": "Environment 관리", 
+    "api_management": "API 조회",
 }
 
 
@@ -60,5 +64,15 @@ def _success_detail(result: AgentCallResult) -> str:
         causes = data.get("root_causes", [])
         top = causes[0]["summary"] if causes else "원인 미상"
         return f"원인 후보 {len(causes)}건 도출 — 주요 원인: {top}"
+    
+    if agent == "application" or agent == "environment":
+        status = data.get("status", "")
+        user_message = data.get("userMessage", "")
+        return f"{status} — {user_message}"
+    
+    if agent == "api_management":
+        status = data.get("status", "")
+        user_message = data.get("userMessage", "")
+        return f"{status} — {user_message}"
 
     return "완료"

@@ -39,3 +39,6 @@ def get_incident_graph(request: Request) -> "CompiledStateGraph":
 def get_orchestrator_graph(request: Request) -> "CompiledStateGraph":
     """lifespan에서 만들어둔 Orchestrator Agent 그래프 반환."""
     return request.app.state.orchestrator_graph
+
+def get_api_management_graph(request: Request) -> "CompiledStateGraph":
+    return request.app.state.api_management_graph

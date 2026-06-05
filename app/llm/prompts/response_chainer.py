@@ -2,6 +2,9 @@
 
 chainer는 planner가 만든 시나리오의 step들을 살펴보고,
 이전 step의 응답에서 어떤 값을 꺼내 다음 step의 어디에 주입할지를 결정한다.
+
+스키마 변경 반영: step.name→step.title, step.endpoint_id→step.apiId,
+step.static_payload→step.requestSpec.
 """
 
 from __future__ import annotations
@@ -59,13 +62,13 @@ def build_user_prompt(
 
     step_blocks: list[str] = []
     for step in sorted(scenario.steps, key=lambda s: s.order):
-        ep = by_id.get(step.endpoint_id)
+        ep = by_id.get(step.apiId)
         if ep is None:
             # planner가 이미 검증했으므로 여기까진 오면 안 되지만 방어적으로 처리
             continue
 
         block = [
-            f"### {step.ref} (order={step.order}): {step.name}",
+            f"### {step.ref} (order={step.order}): {step.title}",
             f"  endpoint: {ep.method.value} {ep.path}",
         ]
         if ep.auth and ep.auth.type != "none":
@@ -85,9 +88,9 @@ def build_user_prompt(
             block.append(
                 f"  response_schema: {json.dumps(ep.response_schema, ensure_ascii=False)}"
             )
-        if step.static_payload:
+        if step.requestSpec:
             block.append(
-                f"  static_payload (이미 채워진 부분): {json.dumps(step.static_payload, ensure_ascii=False)}"
+                f"  requestSpec (이미 채워진 고정값): {json.dumps(step.requestSpec, ensure_ascii=False)}"
             )
         step_blocks.append("\n".join(block))
 

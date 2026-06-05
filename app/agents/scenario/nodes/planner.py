@@ -4,6 +4,13 @@
 추천 모드: coverage_gaps의 각 갭을 user_intent처럼 사용 (향후 구현).
 
 LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
+
+스키마 변경 반영:
+- ScenarioStep이 TestCaseDraft 호환 구조로 바뀜.
+  endpoint_id→apiId, name→title, static_payload/static_params→requestSpec,
+  expected_status_code/expected_assertions→expectedSpec/assertionSpec.
+- LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채운다.
+- test_case_type은 DRAFT_TO_TEST_CASE_TYPE 매핑으로 서버가 채운다(LLM 입력 아님).
 """
 
 from __future__ import annotations
@@ -17,7 +24,9 @@ from app.agents.scenario.state import AgentError, ScenarioAgentState
 from app.llm import LLMClient
 from app.llm.prompts.scenario_planner import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import (
+    DRAFT_TO_TEST_CASE_TYPE,
     APIInventory,
+    DraftType,
     Scenario,
     ScenarioGenerationMode,
     ScenarioMeta,
@@ -30,7 +39,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LLM 출력 전용 스키마
 # ---------------------------------------------------------------------------
-# 우리의 Scenario 스키마에는 step_id(uuid), scenario_id(uuid) 같은 서버 발급 필드가 있음.
+# 우리의 Scenario 스키마에는 step_id(uuid), scenario_id(uuid) 같은 서버 발급 필드와
+# test_case_type(매핑 파생값), chained_variables(chainer가 채움)가 있음.
 # LLM에게 이런 걸 만들게 하면 토큰 낭비 + 형식 오류 위험.
 # LLM 출력용 슬림 스키마를 별도로 정의하고, 우리 코드가 진짜 객체로 조립한다.
 
@@ -38,19 +48,32 @@ logger = logging.getLogger(__name__)
 class PlannerStep(BaseModel):
     ref: str = Field(description="스텝 단축 식별자. 'step_1', 'step_2' 형식")
     order: int = Field(ge=1, description="실행 순서. 1부터")
-    endpoint_id: str = Field(description="API Inventory에 존재하는 endpoint_id")
-    name: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름")
+    apiId: str = Field(description="API Inventory에 존재하는 endpoint_id")
+    title: str = Field(description="이 스텝이 무엇을 하는지 짧은 이름")
     description: str | None = None
-    static_payload: dict[str, Any] | None = Field(
+
+    type: DraftType = Field(
+        default=DraftType.HAPPY_PATH,
+        description="HAPPY_PATH / VALIDATION / FAILURE_HANDLING / EDGE_CASE / AUTHORIZATION / PERFORMANCE",
+    )
+
+    userRole: str | None = None
+    stateCondition: str | None = None
+    dataVariant: str | None = None
+
+    requestSpec: dict[str, Any] | None = Field(
         default=None,
-        description="요청 바디의 고정 값. 동적 값(이전 응답)은 여기 넣지 말 것",
+        description="요청 스펙 {method, pathParams, queryParams, body}. "
+                    "고정값만. 이전 응답에서 받아올 동적값은 넣지 말 것(chainer가 처리)",
     )
-    static_params: dict[str, Any] = Field(
-        default_factory=dict,
-        description="경로/쿼리 파라미터 고정 값",
+    expectedSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="기대 응답 {statusCode, body, errorMessage}",
     )
-    expected_status_code: int = Field(default=200, ge=100, le=599)
-    expected_assertions: list[str] = Field(default_factory=list)
+    assertionSpec: dict[str, Any] | None = Field(
+        default=None,
+        description="검증 스펙 {statusCode, bodyContains, bodyEquals, headerContains}",
+    )
 
 
 class PlannerScenario(BaseModel):
@@ -131,7 +154,7 @@ def make_planner_node(llm: LLMClient):
                 "token_usages": [usage],
             }
 
-        # endpoint_id, ref 검증 + Scenario 조립
+        # apiId, ref 검증 + Scenario 조립
         scenarios, errs = _assemble_scenarios(parsed, inventory)
 
         return {
@@ -160,7 +183,7 @@ def _assemble_scenarios(
     scenarios: list[Scenario] = []
     errors: list[AgentError] = []
 
-    for idx, ps in enumerate(parsed.scenarios):
+    for ps in parsed.scenarios:
         # ref 중복 검사
         refs = [s.ref for s in ps.steps]
         if len(refs) != len(set(refs)):
@@ -171,8 +194,8 @@ def _assemble_scenarios(
             ))
             continue
 
-        # endpoint_id 존재 확인
-        bad_ids = [s.endpoint_id for s in ps.steps if s.endpoint_id not in valid_ids]
+        # apiId 존재 확인
+        bad_ids = [s.apiId for s in ps.steps if s.apiId not in valid_ids]
         if bad_ids:
             errors.append(AgentError(
                 node="planner",
@@ -196,14 +219,19 @@ def _assemble_scenarios(
             ScenarioStep(
                 ref=s.ref,
                 order=s.order,
-                endpoint_id=s.endpoint_id,
-                name=s.name,
-                description=s.description,
-                static_payload=s.static_payload,
-                static_params=s.static_params,
                 chained_variables=[],  # chainer 노드가 채움
-                expected_status_code=s.expected_status_code,
-                expected_assertions=s.expected_assertions,
+                apiId=s.apiId,
+                title=s.title,
+                description=s.description,
+                type=s.type,
+                # 매핑 파생값. 응답에 노출하지 않으려면 직렬화 시 exclude.
+                test_case_type=DRAFT_TO_TEST_CASE_TYPE.get(s.type),
+                userRole=s.userRole,
+                stateCondition=s.stateCondition,
+                dataVariant=s.dataVariant,
+                requestSpec=s.requestSpec,
+                expectedSpec=s.expectedSpec,
+                assertionSpec=s.assertionSpec,
             )
             for s in sorted_steps
         ]

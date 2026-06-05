@@ -4,13 +4,15 @@
 
     START
       → intent_parser
-        ├─(자연어 모드)─→ planner ─→ chainer ─→ validator ─→ END
-        └─(추천 모드)──→ recommender ─→ planner ─→ chainer ─→ validator ─→ END
+        ├─(자연어 모드)─→ planner ─→ chainer ─→ dedup ─→ validator ─→ risk ─→ END
+        └─(추천 모드)──→ recommender ─→ planner ─→ chainer ─→ dedup ─→ validator ─→ risk ─→ END
 
 설계 결정:
 1. build_graph(llm)이 LLM 클라이언트를 받아 노드들에 주입.
-2. 다른 노드들은 아직 stub. 단계적으로 교체 예정.
-3. 컴파일된 그래프는 모듈 레벨에서 만들지 않음 (LLM 클라이언트가 필요하므로).
+2. dedup: 기존 테스트와 비교해 step.duplicate 플래그 세팅 (LLM 없음).
+3. validator: 스키마 정합성/체이닝 경로 검증 (LLM 없음, 비파괴적 — errors에 기록만).
+4. risk: 시나리오 단위 위험도(meta.estimated_risk) 산정 (LLM 없음, 규칙 기반).
+5. 컴파일된 그래프는 모듈 레벨에서 만들지 않음 (LLM 클라이언트가 필요하므로).
    대신 호출 측(엔드포인트 의존성)에서 build_graph(llm).compile() 호출.
 
 구현 상태:
@@ -18,7 +20,9 @@
 - recommender:   stub (다음 단계)
 - planner:       실제 구현 (Claude 호출)
 - chainer:       실제 구현 (Claude 호출)
-- validator:     stub (다음 단계)
+- dedup:         실제 구현 (기존 테스트 대비 중복 플래그)
+- validator:     실제 구현 (스키마 정합성 검증)
+- risk:          실제 구현 (시나리오 단위 위험도 산정)
 """
 
 from __future__ import annotations
@@ -29,10 +33,12 @@ from app.agents.scenario.nodes._stubs import (
     intent_parser_node,
     recommender_node,
     route_after_intent,
-    validator_node,
 )
 from app.agents.scenario.nodes.chainer import make_chainer_node
+from app.agents.scenario.nodes.dedup import dedup_node
 from app.agents.scenario.nodes.planner import make_planner_node
+from app.agents.scenario.nodes.risk import risk_node
+from app.agents.scenario.nodes.validator import validator_node
 from app.agents.scenario.state import ScenarioAgentState
 from app.llm import LLMClient
 
@@ -53,7 +59,9 @@ def build_graph(llm: LLMClient) -> StateGraph:
     graph.add_node("recommender", recommender_node)
     graph.add_node("planner", make_planner_node(llm))
     graph.add_node("chainer", make_chainer_node(llm))
+    graph.add_node("dedup", dedup_node)
     graph.add_node("validator", validator_node)
+    graph.add_node("risk", risk_node)
 
     # 엣지 연결
     graph.add_edge(START, "intent_parser")
@@ -67,7 +75,9 @@ def build_graph(llm: LLMClient) -> StateGraph:
     )
     graph.add_edge("recommender", "planner")
     graph.add_edge("planner", "chainer")
-    graph.add_edge("chainer", "validator")
-    graph.add_edge("validator", END)
+    graph.add_edge("chainer", "dedup")
+    graph.add_edge("dedup", "validator")
+    graph.add_edge("validator", "risk")
+    graph.add_edge("risk", END)
 
     return graph

@@ -36,6 +36,7 @@ def make_dispatcher_node(
     testcase_graph: CompiledStateGraph,
     scenario_graph: CompiledStateGraph,
     incident_graph: CompiledStateGraph,
+    api_management_graph: CompiledStateGraph,
     llm,  # TestCase agent는 llm을 state에 넣음
 ):
     def dispatcher_node(state: OrchestratorAgentState) -> dict:
@@ -64,6 +65,14 @@ def make_dispatcher_node(
                     result = _run_scenario(scenario_graph, project_id, context, intent)
                 elif agent_type == "incident":
                     result = _run_incident(incident_graph, project_id, context, intent)
+                elif agent_type == "application":
+                    result = _run_application(state, llm)
+                elif agent_type == "environment":
+                    result = _run_environment(state, llm)
+                elif agent_type == "api_management":
+                    result = _run_api_management(api_management_graph, state)
+                elif agent_type == "general":
+                    result = _run_general(state, llm)
                 else:
                     result = AgentCallResult(
                         agent_type=agent_type,
@@ -297,6 +306,116 @@ def _run_incident(graph, project_id: str, context: dict, intent: dict) -> AgentC
             "root_causes": final.get("root_cause_candidates", []),
             "internal_report": internal_report,
             "external_notice": final.get("external_notice", ""),
+        },
+        error_message=None,
+    )
+
+def _run_general(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    from app.agents.general import ask
+
+    user_prompt = state.get("user_prompt", "")
+    try:
+        answer = ask(user_prompt, llm)
+        return AgentCallResult(
+            agent_type="general",
+            success=True,
+            data={"answer": answer},
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="general",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
+    
+def _run_application(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    """Application Agent 호출."""
+    from app.agents.application import handle
+    from app.schemas.chat import ChatRequest
+
+    request = ChatRequest(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        formSubmission=state.get("context", {}).get("formSubmission"),
+    )
+
+    try:
+        response = handle(request, llm)
+        return AgentCallResult(
+            agent_type="application",
+            success=True,
+            data=response.model_dump(),
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="application",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
+
+
+def _run_environment(state: OrchestratorAgentState, llm) -> AgentCallResult:
+    """Environment Agent 호출."""
+    from app.agents.environment import handle
+    from app.schemas.chat import ChatRequest
+
+    request = ChatRequest(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        formSubmission=state.get("context", {}).get("formSubmission"),
+    )
+
+    try:
+        response = handle(request, llm)
+        return AgentCallResult(
+            agent_type="environment",
+            success=True,
+            data=response.model_dump(),
+            error_message=None,
+        )
+    except Exception as e:
+        return AgentCallResult(
+            agent_type="environment",
+            success=False,
+            data=None,
+            error_message=str(e),
+        )
+    
+def _run_api_management(graph, state: OrchestratorAgentState) -> AgentCallResult:
+    from app.agents.api_management.state import initial_state as api_mgmt_initial_state
+
+    trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+    init = api_mgmt_initial_state(
+        message=state.get("user_prompt", ""),
+        context=state.get("context", {}),
+        trace_id=trace_id,
+    )
+    final = graph.invoke(init)
+
+    user_message = final.get("user_message")
+    if not user_message:
+        errors = final.get("errors", [])
+        return AgentCallResult(
+            agent_type="api_management",
+            success=False,
+            data=None,
+            error_message=errors[0]["message"] if errors else "API 조회 실패",
+        )
+
+    return AgentCallResult(
+        agent_type="api_management",
+        success=True,
+        data={
+            "intent": final.get("intent"),
+            "confidence": final.get("confidence"),
+            "status": final.get("status"),
+            "target": final.get("target"),
+            "action": final.get("action"),
+            "userMessage": user_message,
         },
         error_message=None,
     )
