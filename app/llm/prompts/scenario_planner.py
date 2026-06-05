@@ -3,18 +3,13 @@
 프롬프트는 코드와 분리해 두는 게 향후 평가·튜닝에 유리.
 프롬프트 변경 시 diff가 명확하고, 모델 비교 시 동일 프롬프트를 양쪽에 주입 가능.
 
-[2단계 변경]
-- 각 스텝의 type(DraftType)을 LLM이 분류하도록.
-- requestSpec.body가 해당 endpoint의 request_body_schema 구조/필수필드를 따르도록 강제
-  (이전 스텝 응답에서 와야 하는 동적 값은 비워두고 chainer가 채움).
-- expectedSpec / assertionSpec를 LLM이 채우도록.
-- user 프롬프트에 각 endpoint의 parameters / request_body_schema / response_schema를 포함
-  (이전에는 endpoint_id/summary만 줘서 LLM이 body 구조를 알 수 없었음 → 정합성 문제의 근본 원인).
+스키마 변경 반영:
+- 스텝 출력이 TestCaseDraft 호환 필드로 바뀜
+  (apiId/title/type/requestSpec/expectedSpec/assertionSpec).
+- 변수 체이닝은 별도 단계(Response Chainer)가 처리하므로 여기서는 만들지 않음.
 """
 
 from __future__ import annotations
-
-import json
 
 from app.schemas import APIInventory
 
@@ -27,74 +22,39 @@ SYSTEM_PROMPT = """\
 - 단일 API 동작이 아니라, 여러 API가 연결되는 실제 서비스 흐름을 검증하는 것이 목표입니다.
 
 설계 원칙:
-1. 각 스텝의 endpoint_id는 반드시 제공된 API 목록에서 선택해야 합니다. 임의로 만들면 안 됩니다.
-2. 스텝 순서는 실제 사용자 행동 흐름과 일치해야 합니다 (예: 로그인 → 인증 필요한 API).
-3. 인증이 필요한 API 앞에는 토큰을 발급하는 스텝을 배치합니다.
+1. 각 스텝의 apiId는 반드시 제공된 API 목록(endpoint_id)에서 선택해야 합니다. 임의로 만들면 안 됩니다.
+2. 스텝 순서(order)는 실제 사용자 행동 흐름과 일치해야 합니다 (예: 로그인 → 인증 필요한 API).
+3. 인증이 필요한 API 앞에는 토큰 발급 API를 배치합니다.
 4. 한 시나리오의 스텝 수는 2~8개가 적절합니다. 너무 길면 검증이 어려워집니다.
-5. 가능하면 정상 흐름과 함께 변형(실패) 흐름도 시나리오로 추가하세요.
+5. 변수 전달(예: 토큰을 다음 요청에 주입) 매핑은 이 단계에서 만들지 않습니다.
+   별도 단계가 이를 처리하므로, 당신은 흐름 설계와 각 스텝의 '고정 입력값' 결정에만 집중하세요.
 
-## 각 스텝에 채울 필드
+각 스텝(step)이 채워야 할 필드:
+- ref: 'step_1', 'step_2'처럼 순번을 매기되 한 시나리오 안에서 유일해야 합니다.
+- order: 1부터 시작하는 연속된 정수입니다.
+- apiId: 위 API 목록의 endpoint_id 중 하나.
+- title: 이 스텝이 무엇을 하는지 짧은 한글 이름 (예: '로그인').
+- description: 한글 설명.
+- type: 다음 중 하나로 이 스텝의 성격을 분류합니다.
+    HAPPY_PATH      정상 입력으로 성공하는 흐름
+    VALIDATION      잘못된/누락/타입 오류 입력
+    FAILURE_HANDLING 서버 오류·타임아웃 등 실패 처리
+    EDGE_CASE       경계값, 빈 배열, 최대 길이, null 필드
+    AUTHORIZATION   토큰 누락·만료·권한 부족 (인증 필요 API에서만)
+    PERFORMANCE     고부하·대용량 페이로드
+- requestSpec: 보낼 요청의 고정값. 형식 {"method", "pathParams", "queryParams", "body"}.
+    예: {"method": "POST", "pathParams": {}, "queryParams": {}, "body": {"email": "test@example.com"}}
+    이전 스텝 응답에서 받아올 동적값(토큰, 생성된 ID 등)은 넣지 마세요. 다음 단계가 채웁니다.
+- expectedSpec: 기대 응답. 형식 {"statusCode", "body", "errorMessage"}.
+    정상: {"statusCode": 200, "body": {...}, "errorMessage": null}
+    오류: {"statusCode": 400, "body": {...}, "errorMessage": "Validation failed: ..."}
+- assertionSpec: 검증 기준. 형식 {"statusCode", "bodyContains", "bodyEquals", "headerContains"}.
+    예: {"statusCode": 200, "bodyContains": ["userId"], "bodyEquals": {}, "headerContains": {}}
 
-### type (이 스텝의 성격 분류)
-- HAPPY_PATH: 유효한 입력으로 정상 동작하는 경우
-- VALIDATION: 잘못된/누락된/타입이 틀린 입력
-- FAILURE_HANDLING: 서버 오류·타임아웃 등 실패 처리
-- EDGE_CASE: 경계값 (빈 배열, 최대 길이, 0, null 등)
-- AUTHORIZATION: 인증 누락/만료/권한 부족 (auth가 필요한 API에서만)
-- PERFORMANCE: 대용량·고부하 시나리오
-→ 흐름의 의도에 맞게 정확히 분류하세요. 예: 토큰 없이 보호된 API를 호출하는 스텝은 AUTHORIZATION 입니다.
-
-### requestSpec  {method, pathParams, queryParams, body}
-- method는 해당 endpoint의 메서드를 그대로.
-- body는 **반드시 해당 endpoint의 request_body_schema 구조를 따르고, required 필드를 모두 포함**해야 합니다.
-- request_body_schema에 **없는 필드는 절대 넣지 마세요.**
-- **정적인(고정) 값만** 채우세요. 이전 스텝의 응답에서 와야 하는 동적 값
-  (인증 토큰, 이전 단계에서 생성된 userId/orderId 같은 식별자 등)은
-  body/pathParams/queryParams에 넣지 말고 **비워두세요. 별도 단계(chainer)가 채웁니다.**
-- pathParams는 경로 템플릿({...})에 해당하는 정적 값, queryParams는 쿼리 파라미터 정적 값.
-
-### expectedSpec  {statusCode, body, errorMessage}
-- statusCode: 이 스텝의 기대 HTTP 상태 코드.
-- body: 주요 기대 응답 필드의 예시 객체 (마땅치 않으면 null).
-- errorMessage: 실패 케이스면 기대 에러 메시지 문자열, 정상 케이스면 null.
-
-### assertionSpec  {statusCode, bodyContains, bodyEquals, headerContains}
-- statusCode: 기대 상태 코드 (int).
-- bodyContains: 응답 body에 포함되어야 하는 키 또는 문자열 목록 (예: ["orderId", "status"]).
-- bodyEquals: 정확히 일치해야 하는 필드-값 쌍 (없으면 {}).
-- headerContains: 확인할 응답 헤더 (예: {"Content-Type": "application/json"}).
-
-## 출력 형식
+출력 형식:
 - 반드시 제공된 도구(emit_scenarios)를 호출하여 결과를 반환하세요.
-- ref는 'step_1', 'step_2'처럼 순번을 매기되 한 시나리오 안에서 유일해야 합니다.
-- order는 1부터 시작하는 정수이며 연속이어야 합니다.
-- title / description은 한국어로 작성하세요.
+- title/description은 한글로 작성하세요.
 """
-
-
-def _endpoint_block(ep) -> str:
-    """LLM이 정확한 body/스펙을 만들도록 endpoint 1개의 상세를 직렬화."""
-    lines = [f"- {ep.endpoint_id}  ({ep.method.value} {ep.path})"]
-    if ep.summary:
-        lines.append(f"    설명: {ep.summary}")
-    if ep.auth and ep.auth.type != "none":
-        location = f", location={ep.auth.location}" if ep.auth.location else ""
-        lines.append(f"    인증: {ep.auth.type}{location}")
-    if ep.parameters:
-        params = [
-            f"{p.name}({p.location}, {p.type}{', required' if p.required else ''})"
-            for p in ep.parameters
-        ]
-        lines.append(f"    parameters: {', '.join(params)}")
-    if ep.request_body_schema:
-        lines.append(
-            f"    request_body_schema: {json.dumps(ep.request_body_schema, ensure_ascii=False)}"
-        )
-    if ep.response_schema:
-        lines.append(
-            f"    response_schema: {json.dumps(ep.response_schema, ensure_ascii=False)}"
-        )
-    return "\n".join(lines)
 
 
 def build_user_prompt(
@@ -106,16 +66,24 @@ def build_user_prompt(
 ) -> str:
     """user 프롬프트를 조립.
 
-    각 endpoint의 메서드/파라미터/요청·응답 스키마까지 제공해야
-    LLM이 request_body_schema에 맞는 body를 만들 수 있다.
+    API 목록은 LLM이 이해하기 쉽도록 간결한 텍스트로 직렬화.
+    (전체 JSON Schema를 그대로 넣으면 토큰만 잡아먹고 정확도가 떨어짐.)
     """
-    if inventory.endpoints:
-        api_block = "\n".join(_endpoint_block(ep) for ep in inventory.endpoints)
-    else:
-        api_block = "(API 없음)"
+    api_lines: list[str] = []
+    for ep in inventory.endpoints:
+        line = f"- {ep.endpoint_id}"
+        if ep.summary:
+            line += f"  ({ep.summary})"
+        if ep.auth and ep.auth.type != "none":
+            line += f"  [인증: {ep.auth.type}]"
+        if ep.tags:
+            line += f"  태그: {', '.join(ep.tags)}"
+        api_lines.append(line)
+
+    api_block = "\n".join(api_lines) if api_lines else "(API 없음)"
 
     return f"""\
-프로젝트의 사용 가능한 API 목록 (각 endpoint의 스키마 포함):
+프로젝트의 사용 가능한 API 목록:
 {api_block}
 
 사용자가 원하는 흐름:
@@ -124,9 +92,8 @@ def build_user_prompt(
 요구사항:
 - 위 흐름을 검증하는 시나리오를 {max_scenarios}개 이내로 만드세요.
 - 각 시나리오는 {max_steps_per_scenario}개 스텝 이하여야 합니다.
-- 각 스텝의 type을 정확히 분류하고, requestSpec.body는 해당 endpoint의 request_body_schema를 따르세요.
-- 이전 스텝 응답에서 와야 하는 동적 값(토큰, 생성된 ID 등)은 body에 넣지 말고 비워두세요.
-- 사용자의 의도를 다각도로 검증하도록, 정상 흐름과 함께 변형 흐름(잘못된 입력/미인증 등)도 추가하세요.
+- 사용자의 의도를 다각도로 검증할 수 있도록, 가능하면 정상 흐름(type=HAPPY_PATH)과 함께
+  변형 흐름(예: 잘못된 입력은 VALIDATION, 인증 누락은 AUTHORIZATION)도 시나리오로 추가하세요.
 
 도구(emit_scenarios)를 호출해 결과를 반환하세요.
 """

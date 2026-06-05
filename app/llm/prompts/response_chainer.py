@@ -3,11 +3,8 @@
 chainer는 planner가 만든 시나리오의 step들을 살펴보고,
 이전 step의 응답에서 어떤 값을 꺼내 다음 step의 어디에 주입할지를 결정한다.
 
-[1단계 변경]
-step의 필드 접근을 새 구조로 변경:
-- step.endpoint_id -> step.apiId
-- step.name        -> step.title
-- step.static_payload -> step.requestSpec["body"]
+스키마 변경 반영: step.name→step.title, step.endpoint_id→step.apiId,
+step.static_payload→step.requestSpec.
 """
 
 from __future__ import annotations
@@ -91,11 +88,9 @@ def build_user_prompt(
             block.append(
                 f"  response_schema: {json.dumps(ep.response_schema, ensure_ascii=False)}"
             )
-
-        static_body = (step.requestSpec or {}).get("body")
-        if static_body:
+        if step.requestSpec:
             block.append(
-                f"  static body (이미 채워진 부분): {json.dumps(static_body, ensure_ascii=False)}"
+                f"  requestSpec (이미 채워진 고정값): {json.dumps(step.requestSpec, ensure_ascii=False)}"
             )
         step_blocks.append("\n".join(block))
 
