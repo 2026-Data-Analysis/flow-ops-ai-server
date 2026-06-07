@@ -169,7 +169,7 @@ class TestCaseGenerationRequest(BaseModel):
     environment: EnvironmentInfo
     metadata: RequestMetadata
     generationContext: GenerationContext
-    apis: list[ApiSpec]
+    apis: list[ApiSpec] = []
     existingTestCases: list[ExistingTestCase] = []
     failureContext: FailureContext | None = None
 
