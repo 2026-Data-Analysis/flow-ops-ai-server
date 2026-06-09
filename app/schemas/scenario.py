@@ -180,7 +180,7 @@ class ScenarioMeta(BaseModel):
         description="추천 모드 한정. 어떤 커버리지 갭을 메우는지. 예: '결제 실패 후 재시도 흐름 없음'",
     )
     estimated_risk: RiskLevel = Field(
-        default=RiskLevel.MEDIUM,
+        default=RiskLevel.SANITY,
         description="이 시나리오에서 문제 발생 시 영향도(시나리오 단위). 값은 대문자 enum(LOW/MEDIUM/HIGH/CRITICAL). "
                     "risk 노드가 app/core/risk.py의 공용 assess_risk로 산정.",
     )
