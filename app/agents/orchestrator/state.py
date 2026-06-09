@@ -17,6 +17,7 @@ import operator
 from typing import Annotated, Any, TypedDict
 
 from app.schemas import TokenUsage
+from app.schemas.orchestrator import AgentResultItem
 
 
 class OrchestratorError(TypedDict):
@@ -25,19 +26,14 @@ class OrchestratorError(TypedDict):
     message: str
 
 
-class AgentCallResult(TypedDict):
-    """단일 Agent 호출 결과."""
+AgentCallResult = AgentResultItem
 
-    agent_type: str          # "testcase" | "scenario" | "incident"
-    success: bool
-    data: Any | None
-    error_message: str | None
 
 
 class OrchestratorAgentState(TypedDict, total=False):
     # 입력
     user_prompt: str
-    project_id: str
+    project_id: str 
     context: dict[str, Any]  # api_inventory, log_entries 등 추가 컨텍스트
 
     # intent_classifier 출력

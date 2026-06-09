@@ -159,6 +159,8 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             user_instruction=ctx.userInstruction,
         )
 
+        logger.info(f"context_summary: {ctx.contextSummary!r}")
+
         logger.debug(
             "generate_drafts.llm_input requestId=%s apiId=%s prompt_len=%d prompt=%s",
             req.requestId,

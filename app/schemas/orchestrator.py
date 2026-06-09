@@ -44,7 +44,17 @@ class OrchestratorResult(BaseModel):
     dispatched_agents: list[str] = Field(
         description="실행된 Agent 이름 목록 (실행 순서 보존). 서버가 어떤 Agent가 쓰였는지 파악 가능."
     )
-    agent_results: list[AgentResultItem] = Field(
+    agent_results: list[Any] = Field(
         description="각 Agent의 실행 결과"
     )
     summary: str = Field(description="전체 실행 결과 자연어 요약")
+
+class AgentResultItem(BaseModel):
+    agent_type: str
+    success: bool
+    data: Any | None = None
+    error_message: str | None = None
+    action: dict | None = Field(        # ✅ 추가
+        default=None,
+        description="프론트가 렌더링할 액션. type=confirm_save이면 저장 버튼 표시"
+    )
