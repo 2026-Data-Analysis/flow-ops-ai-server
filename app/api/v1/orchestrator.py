@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 import uuid
+import json as _json
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph.graph.state import CompiledStateGraph
 
 from app.agents.orchestrator.state import initial_state
 from app.api.deps import get_orchestrator_graph
+from app.core.logging import log_event
 from app.schemas import AgentResponse
 from app.schemas.orchestrator import AgentResultItem, OrchestratorRequest, OrchestratorResult
 
@@ -40,9 +42,14 @@ def chat(
     _validate_request(payload)
 
     trace_id = f"trace_{uuid.uuid4().hex[:12]}"
-    logger.info(
-        "orchestrator.chat start project=%s trace=%s prompt_len=%d",
-        payload.project_id, trace_id, len(payload.user_prompt),
+
+    # ✅ 요청 수신 로그
+    log_event(logger, "info", "orchestrator.REQUEST",
+        trace_id=trace_id,
+        project_id=payload.project_id,
+        prompt=payload.user_prompt[:100],
+        has_api_inventory=bool(payload.context.get("api_inventory")),
+        has_log=bool(payload.context.get("raw_log") or payload.context.get("log_entries")),
     )
 
     init = initial_state(
@@ -55,7 +62,11 @@ def chat(
     try:
         final = graph.invoke(init)
     except Exception as e:
-        logger.exception("orchestrator graph crashed trace=%s", trace_id)
+        # ✅ 그래프 크래시 로그
+        log_event(logger, "error", "orchestrator.CRASH",
+            trace_id=trace_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"orchestrator agent crashed: {e}") from e
 
     errors = final.get("errors", [])
@@ -66,6 +77,12 @@ def chat(
     # intent_classifier 에러면 완전 실패
     classifier_errors = [e for e in errors if e["node"] == "intent_classifier"]
     if classifier_errors:
+        # ✅ 분류 실패 로그
+        log_event(logger, "warning", "orchestrator.CLASSIFIER_FAILED",
+            trace_id=trace_id,
+            code=classifier_errors[0]["code"],
+            message=classifier_errors[0]["message"],
+        )
         return AgentResponse[OrchestratorResult](
             success=False,
             error_code=classifier_errors[0]["code"],
@@ -75,6 +92,9 @@ def chat(
 
     # 실행된 Agent가 하나도 없으면 실패
     if not dispatched:
+        log_event(logger, "warning", "orchestrator.NO_AGENTS_DISPATCHED",
+            trace_id=trace_id,
+        )
         return AgentResponse[OrchestratorResult](
             success=False,
             error_code="NO_AGENTS_DISPATCHED",
@@ -84,22 +104,20 @@ def chat(
 
     result = OrchestratorResult(
         dispatched_agents=dispatched,
-        agent_results=[
-            AgentResultItem(
-                agent_type=r["agent_type"],
-                success=r["success"],
-                data=r["data"],
-                error_message=r["error_message"],
-            )
-            for r in agent_results
-        ],
+        agent_results=agent_results,
         summary=summary,
     )
+    all_failed = all(not r.success for r in agent_results) if agent_results else True
 
-    all_failed = all(not r["success"] for r in agent_results) if agent_results else True
-    logger.info(
-        "orchestrator.chat done trace=%s dispatched=%s errors=%d",
-        trace_id, dispatched, len(errors),
+    # ✅ 최종 응답 로그
+    log_event(logger, "info", "orchestrator.RESPONSE",
+        trace_id=trace_id,
+        dispatched=dispatched,
+        success=not all_failed,
+        total_agents=len(agent_results),
+        success_count=sum(1 for r in agent_results if r.success),
+        fail_count=sum(1 for r in agent_results if not r.success),
+        error_count=len(errors),
     )
 
     return AgentResponse[OrchestratorResult](
