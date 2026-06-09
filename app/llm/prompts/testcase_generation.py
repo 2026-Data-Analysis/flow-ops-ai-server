@@ -18,6 +18,11 @@ Generate test cases for the following API endpoint.
 - Request Schema: ${request_schema}
 - Response Schema: ${response_schema}
 
+## Domain APIs (참고용)
+같은 도메인의 API 목록. path parameter에 유효한 ID가 필요할 때
+목록 조회 API(GET)를 찾아서 requestSpec에 반영할 것.
+${domain_apis}
+
 ## Context
 - App: ${app_name}
 - Environment: ${env_name} (${base_url})
@@ -28,6 +33,12 @@ Generate test cases for the following API endpoint.
 ## Specific Instructions (Highest Priority)
 1. User Instruction: If a 'User Instruction' is provided above, you MUST generate test cases that explicitly fulfill this natural language scenario.
 2. Valid Identifiers: If 'Valid Identifiers' are provided, you MUST use these exact real values for path parameters, query parameters, or body fields when generating HAPPY_PATH or positive test cases. Do not invent fake IDs if real ones are provided.
+
+## Response Schema Guide
+If Response Schema contains expectedStatusCodes/errorStatusCodes/responses:
+- Use expectedStatusCodes for HAPPY_PATH expectedSpec.statusCode
+- Use errorStatusCodes and responses[].category=="ERROR" for exception test cases
+- Use responses[].description, schema, sampleBody as basis for expectedSpec and assertionSpec
 
 ## Requirements
 Generate 5-8 test cases. Use only these type values:
@@ -98,11 +109,16 @@ def build_generation_prompt(
     context_summary: str | None,
     user_instruction: str | None = None,
     valid_identifiers: dict | None = None,
+    domain_apis: list | None = None,
 ) -> str:
     # ✅ None이면 "없음" — 중괄호 없는 문자열
     req_schema_str = json.dumps(request_schema, ensure_ascii=False, indent=2) if request_schema else "없음"
     res_schema_str = json.dumps(response_schema, ensure_ascii=False, indent=2) if response_schema else "없음"
     valid_ids_str = json.dumps(valid_identifiers, ensure_ascii=False) if valid_identifiers else "없음"
+    domain_apis_str = (
+        "\n".join(f"- [{a.method}] {a.path}" for a in domain_apis)
+        if domain_apis else "없음"
+    )
 
     # ✅ string.Template 사용 — {중괄호} 충돌 완전 차단
     # $변수명 패턴만 치환, { } 는 건드리지 않음
@@ -120,4 +136,5 @@ def build_generation_prompt(
         context_summary=context_summary or "No additional context provided.",
         user_instruction=user_instruction or "None",
         valid_identifiers=valid_ids_str,
+        domain_apis=domain_apis_str,
     )

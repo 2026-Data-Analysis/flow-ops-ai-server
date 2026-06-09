@@ -132,12 +132,12 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
     for api in req.apis:
         logger.info(
             "generate_drafts.api_start requestId=%s apiId=%s "
-            "contextSummaryLen=%d requestSchema=%s responseSchema=%s",
+            "contextSummaryLen=%d request_body_schema=%s response_schema=%s",
             req.requestId,
             api.apiId,
             len(ctx.contextSummary) if ctx.contextSummary else 0,
-            api.requestSchema is not None,
-            api.responseSchema is not None,
+            api.request_body_schema is not None,
+            api.response_schema is not None,
         )
         logger.debug(
             "generate_drafts.api_start requestId=%s apiId=%s contextSummary=%r",
@@ -150,13 +150,14 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             method=api.method,
             path=api.path,
             auth_required=api.authRequired,
-            request_schema=api.requestSchema,
-            response_schema=api.responseSchema,
+            request_schema=api.request_body_schema,
+            response_schema=api.response_schema,
             app_name=req.project.appName,
             env_name=env.name,
             base_url=env.baseUrl,
             context_summary=ctx.contextSummary,
             user_instruction=ctx.userInstruction,
+            domain_apis=req.domainApis,
         )
 
         logger.info(f"context_summary: {ctx.contextSummary!r}")

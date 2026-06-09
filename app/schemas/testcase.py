@@ -61,15 +61,6 @@ class DraftType(str, Enum):
     PERFORMANCE = "PERFORMANCE"       # → NORMAL
 
 
-DRAFT_TO_TEST_CASE_TYPE: dict[DraftType, TestCaseType] = {
-    DraftType.HAPPY_PATH: TestCaseType.NORMAL,
-    DraftType.VALIDATION: TestCaseType.EXCEPTION,
-    DraftType.FAILURE_HANDLING: TestCaseType.EXCEPTION,
-    DraftType.EDGE_CASE: TestCaseType.BOUNDARY,
-    DraftType.AUTHORIZATION: TestCaseType.EXCEPTION,
-    DraftType.PERFORMANCE: TestCaseType.NORMAL,
-}
-
 
 # ── Request sub-models ───────────────────────────────────────────────────────
 
@@ -84,6 +75,9 @@ class EnvironmentInfo(BaseModel):
     name: str
     baseUrl: str
     defaultTestLevel: str
+    authType: str | None = None
+    authConfig: dict[str, Any] | None = None
+    headers: dict[str, Any] | None = None
 
 
 class RequestMetadata(BaseModel):
@@ -130,11 +124,14 @@ class ApiSpec(BaseModel):
     method: str
     path: str
     domainTag: str | None = None
-    requestSchema: dict[str, Any] | None = None
+    request_body_schema: dict[str, Any] | None = None
     # 기존 단일 dict와 신규 ExpandedResponseSchema를 모두 허용 (Backward Compatibility)
-    responseSchema: dict[str, Any] | ExpandedResponseSchema | None = None
-    authRequired: bool = False
+    response_schema: dict[str, Any] | ExpandedResponseSchema | None = None
+    authRequired: bool | None = None
     deprecated: bool = False
+    expectedStatusCodes: list[int] = []
+    errorStatusCodes: list[int] = []
+    errorCodes: list[str] = []
 
 
 class ExistingTestCase(BaseModel):
@@ -170,6 +167,7 @@ class TestCaseGenerationRequest(BaseModel):
     metadata: RequestMetadata
     generationContext: GenerationContext
     apis: list[ApiSpec]
+    domainApis: list[ApiSpec] = []
     existingTestCases: list[ExistingTestCase] = []
     failureContext: FailureContext | None = None
 
@@ -183,10 +181,6 @@ class TestCaseDraft(BaseModel):
     title: str
     description: str
     type: DraftType
-    test_case_type: TestCaseType | None = Field(
-        default=None,
-        description="DRAFT_TO_TEST_CASE_TYPE 매핑 결과. 커버리지 분석에 사용.",
-    )
     userRole: str | None = None
     stateCondition: str | None = None
     dataVariant: str | None = None

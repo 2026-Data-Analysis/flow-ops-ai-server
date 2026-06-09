@@ -25,10 +25,10 @@ class HttpMethod(str, Enum):
 class RiskLevel(str, Enum):
     """위험도 레벨 (제안서 2.2 비교표 'AI 위험도 분류' 항목과 일치)."""
 
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+    SMOKE = "SMOKE"
+    SANITY = "SANITY"
+    REGRESSION = "REGRESSION"
+    FULL_SUITE = "FULL_SUITE"
 
 
 T = TypeVar("T")

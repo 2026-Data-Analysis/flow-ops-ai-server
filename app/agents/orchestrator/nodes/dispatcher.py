@@ -531,17 +531,17 @@ def _generate_testcase(
         raw_path = ep.get("path") or ep.get("endpointPath", "/")
         safe_path = raw_path.replace("{", "{{").replace("}", "}}")
 
-        # requestSchema, responseSchema 변환
-        request_schema = ep.get("requestSchema") or ep.get("request_body_schema")
-        response_schema = ep.get("responseSchema") or ep.get("response_schema")
+        # request_body_schema, response_schema 변환
+        request_schema = ep.get("request_body_schema") or ep.get("requestSchema")
+        response_schema = ep.get("response_schema") or ep.get("responseSchema")
 
         single_api = ApiSpec(
             apiId=str(ep.get("apiId") or ep.get("id", "")),
             method=ep.get("method", "GET"),
             path=safe_path,
             domainTag=ep.get("domainTag"),
-            requestSchema=request_schema,
-            responseSchema=response_schema,
+            request_body_schema=request_schema,
+            response_schema=response_schema,
             authRequired=ep.get("authRequired", False),
             deprecated=ep.get("deprecated", False),
         )

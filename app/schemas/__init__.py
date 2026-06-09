@@ -2,7 +2,7 @@
 
 외부 모듈은 `from app.schemas import Scenario, ...` 형태로 임포트한다.
 """
-from .testcase import DraftType, TestCaseType, DRAFT_TO_TEST_CASE_TYPE, TestCase
+from .testcase import DraftType, TestCaseType, TestCase
 from .api_spec import APIEndpoint, APIInventory, AuthScheme, ParameterSpec
 from .common import AgentResponse, HttpMethod, RiskLevel, TokenUsage
 from .scenario import (
@@ -18,7 +18,6 @@ from .scenario import (
 from .testcase import (
     ApiSpec,
     DraftType,
-    DRAFT_TO_TEST_CASE_TYPE,
     EnvironmentInfo,
     ExistingTestCase,
     FailureContext,
@@ -49,7 +48,6 @@ __all__ = [
     # testcase — generation agent
     "ApiSpec",
     "DraftType",
-    "DRAFT_TO_TEST_CASE_TYPE",
     "EnvironmentInfo",
     "ExistingTestCase",
     "FailureContext",

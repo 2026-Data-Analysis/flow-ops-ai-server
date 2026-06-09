@@ -3,7 +3,6 @@ import logging
 from app.agents.testcase.state import TestCaseAgentState
 from app.schemas.testcase import (
     DraftType,
-    DRAFT_TO_TEST_CASE_TYPE,
     ExistingTestCase,
     TestCaseDraft,
 )
@@ -69,7 +68,6 @@ async def deduplicate(state: TestCaseAgentState) -> dict:
                     title=raw.get("title", ""),
                     description=raw.get("description", ""),
                     type=draft_type,
-                    test_case_type=DRAFT_TO_TEST_CASE_TYPE[draft_type],
                     userRole=raw.get("userRole"),
                     stateCondition=raw.get("stateCondition"),
                     dataVariant=raw.get("dataVariant"),
