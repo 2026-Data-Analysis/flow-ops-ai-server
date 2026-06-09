@@ -242,6 +242,6 @@ def _chain_one_scenario(
         step.model_copy(update={"chained_variables": mappings_by_ref.get(step.ref, [])})
         for step in scenario.steps
     ]
-    updated = scenario.model_copy(update={"steps": new_steps})
+    updated = scenario.model_copy(update={"steps": new_steps, "type": scenario.type})
 
     return updated, errors, usage

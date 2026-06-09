@@ -196,6 +196,11 @@ class Scenario(BaseModel):
     name: str = Field(description="시나리오 이름. 예: '신규 사용자 첫 게시글 작성 흐름'")
     description: str | None = None
 
+    # steps[*].type 중 흐름의 핵심 의도를 대표하는 1개. planner LLM이 직접 고름.
+    type: DraftType = Field(
+        description="시나리오 대표 type. steps의 type 중 흐름의 핵심 의도를 대표하는 1개",
+    )
+
     steps: list[ScenarioStep]
     meta: ScenarioMeta
 

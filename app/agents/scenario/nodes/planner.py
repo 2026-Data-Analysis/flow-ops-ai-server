@@ -51,7 +51,6 @@ class PlannerStep(BaseModel):
     description: str | None = None
 
     type: DraftType = Field(
-        default=DraftType.HAPPY_PATH,
         description="HAPPY_PATH / VALIDATION / FAILURE_HANDLING / EDGE_CASE / AUTHORIZATION / PERFORMANCE",
     )
 
@@ -78,6 +77,12 @@ class PlannerScenario(BaseModel):
     name: str = Field(description="시나리오 이름")
     description: str | None = None
     rationale: str = Field(description="왜 이 흐름을 만들었는지 한 줄 설명")
+    type: DraftType = Field(
+        description=(
+            "이 시나리오의 대표 type. steps의 type 중 흐름의 핵심 의도를 가장 잘 나타내는 1개를 "
+            "직접 고르세요(무작위 금지). 모든 스텝이 정상 흐름이면 HAPPY_PATH."
+        ),
+    )
     steps: list[PlannerStep]
 
 
@@ -234,11 +239,34 @@ def _assemble_scenarios(
         scenarios.append(Scenario(
             name=ps.name,
             description=ps.description,
+            type=_resolve_representative_type(ps),
             steps=steps,
             meta=ScenarioMeta(rationale=ps.rationale),
         ))
 
     return scenarios, errors
+
+
+# LLM이 선택한 시나리오 대표 type이 steps에 실제로 존재하는지 확인.
+# 실패 시 우선순위에 따라 대표 type을 재결정.
+_REPRESENTATIVE_FALLBACK_PRIORITY = [
+    DraftType.FAILURE_HANDLING, DraftType.AUTHORIZATION, DraftType.VALIDATION,
+    DraftType.EDGE_CASE, DraftType.PERFORMANCE, DraftType.HAPPY_PATH,
+]
+
+
+def _resolve_representative_type(ps: PlannerScenario) -> DraftType:
+    step_types = {s.type for s in ps.steps}
+    if ps.type in step_types:
+        return ps.type
+    logger.warning(
+        "시나리오 '%s': LLM 대표 type(%s)이 step type %s에 없어 폴백",
+        ps.name, ps.type.value, sorted(t.value for t in step_types),
+    )
+    for c in _REPRESENTATIVE_FALLBACK_PRIORITY:
+        if c in step_types:
+            return c
+    return ps.type
 
 
 def _err_only(node: str, code: str, message: str) -> dict:
