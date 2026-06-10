@@ -158,6 +158,9 @@ async def generate_drafts(state: TestCaseAgentState) -> dict:
             context_summary=ctx.contextSummary,
             user_instruction=ctx.userInstruction,
             domain_apis=req.domainApis,
+            expected_status_codes=api.expectedStatusCodes,
+            error_status_codes=api.errorStatusCodes,
+            error_codes=api.errorCodes,
         )
 
         logger.info(f"context_summary: {ctx.contextSummary!r}")
