@@ -17,6 +17,9 @@ Generate test cases for the following API endpoint.
 - Auth Required: ${auth_required}
 - Request Schema: ${request_schema}
 - Response Schema: ${response_schema}
+- Expected Status Codes: ${expected_status_codes}
+- Error Status Codes: ${error_status_codes}
+- Error Codes: ${error_codes}
 
 ## Domain APIs (참고용)
 같은 도메인의 API 목록. path parameter에 유효한 ID가 필요할 때
@@ -41,7 +44,8 @@ If Response Schema contains expectedStatusCodes/errorStatusCodes/responses:
 - Use responses[].description, schema, sampleBody as basis for expectedSpec and assertionSpec
 
 ## Requirements
-Generate 5-8 test cases. Use only these type values:
+Generate 5-8 test cases. Use ONLY these exact type values (no other values allowed):
+HAPPY_PATH, VALIDATION, FAILURE_HANDLING, EDGE_CASE, AUTHORIZATION, PERFORMANCE
 - HAPPY_PATH: Normal successful request with valid inputs
 - VALIDATION: Invalid/missing/wrong-type inputs
 - FAILURE_HANDLING: Server errors, timeouts, unexpected failures
@@ -110,6 +114,9 @@ def build_generation_prompt(
     user_instruction: str | None = None,
     valid_identifiers: dict | None = None,
     domain_apis: list | None = None,
+    expected_status_codes: list | None = None,
+    error_status_codes: list | None = None,
+    error_codes: list | None = None,
 ) -> str:
     # ✅ None이면 "없음" — 중괄호 없는 문자열
     req_schema_str = json.dumps(request_schema, ensure_ascii=False, indent=2) if request_schema else "없음"
@@ -119,6 +126,9 @@ def build_generation_prompt(
         "\n".join(f"- [{a.method}] {a.path}" for a in domain_apis)
         if domain_apis else "없음"
     )
+    expected_status_codes_str = json.dumps(expected_status_codes) if expected_status_codes else "없음"
+    error_status_codes_str = json.dumps(error_status_codes) if error_status_codes else "없음"
+    error_codes_str = json.dumps(error_codes, ensure_ascii=False) if error_codes else "없음"
 
     # ✅ string.Template 사용 — {중괄호} 충돌 완전 차단
     # $변수명 패턴만 치환, { } 는 건드리지 않음
@@ -137,4 +147,7 @@ def build_generation_prompt(
         user_instruction=user_instruction or "None",
         valid_identifiers=valid_ids_str,
         domain_apis=domain_apis_str,
+        expected_status_codes=expected_status_codes_str,
+        error_status_codes=error_status_codes_str,
+        error_codes=error_codes_str,
     )
