@@ -73,6 +73,14 @@ Example:
   BAD:  "description": "잘못된 바디로 요청", requestSpec 없음
   GOOD: "requestSpec": {"body": {"email": "not-an-email"}}
 
+## Path Parameter Type Rules (CRITICAL)
+Path parameters that represent IDs (e.g. executionId, orderId, appId, userId) MUST always be numeric (Long type).
+- GOOD: "pathParams": {"executionId": 99999}
+- BAD:  "pathParams": {"executionId": "nonexistent-exec-99999"}
+- GOOD: "pathParams": {"executionId": 0}  (for invalid/nonexistent cases)
+- GOOD: "pathParams": {"executionId": 999999999}  (for nonexistent cases)
+Do NOT use string values for ID path parameters under any circumstances.
+
 ## Output Fields
 Fill every field below for each test case. Do NOT leave expectedSpec null.
 
