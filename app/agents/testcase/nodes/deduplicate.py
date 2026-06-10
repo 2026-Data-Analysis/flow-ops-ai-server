@@ -25,6 +25,21 @@ def _fingerprint(api_id: str, draft_type: str, request_spec: dict | None) -> fro
     return frozenset(keys)
 
 
+def _fix_id_path_params(request_spec: dict | None) -> dict | None:
+    if not request_spec or "pathParams" not in request_spec:
+        return request_spec
+    fixed = {}
+    for k, v in request_spec["pathParams"].items():
+        if k.lower().endswith("id") and isinstance(v, str):
+            try:
+                fixed[k] = int("".join(filter(str.isdigit, v)) or "0")
+            except:
+                fixed[k] = 0
+        else:
+            fixed[k] = v
+    return {**request_spec, "pathParams": fixed}
+
+
 def _existing_fingerprints(existing: list[ExistingTestCase]) -> set[frozenset]:
     return {
         _fingerprint(tc.apiId, tc.type.value, tc.requestSpec)
@@ -53,10 +68,12 @@ async def deduplicate(state: TestCaseAgentState) -> dict:
                 )
                 continue
 
+            request_spec = _fix_id_path_params(raw.get("requestSpec"))
+
             fp = _fingerprint(
                 api_id=raw.get("apiId", ""),
                 draft_type=draft_type_str,
-                request_spec=raw.get("requestSpec"),
+                request_spec=request_spec,
             )
             is_duplicate = fp in seen
             if not is_duplicate:
@@ -71,7 +88,7 @@ async def deduplicate(state: TestCaseAgentState) -> dict:
                     userRole=raw.get("userRole"),
                     stateCondition=raw.get("stateCondition"),
                     dataVariant=raw.get("dataVariant"),
-                    requestSpec=raw.get("requestSpec"),
+                    requestSpec=request_spec,
                     expectedSpec=raw.get("expectedSpec"),
                     assertionSpec=raw.get("assertionSpec"),
                     duplicate=is_duplicate,
