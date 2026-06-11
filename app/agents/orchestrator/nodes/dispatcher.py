@@ -96,7 +96,7 @@ def make_dispatcher_node(
                                 f"({elapsed:.0f}ms) — {_result_summary(agent_type, result)}")
                 else:
                     logger.warning(f"[dispatcher] ({idx}/{total}) {agent_type} Agent 실패 "
-                                   f"({elapsed:.0f}ms) — {result.get('error_message')}")
+                                   f"({elapsed:.0f}ms) — {result.error_message}")
 
             except Exception as e:
                 elapsed = (time.perf_counter() - start) * 1000
