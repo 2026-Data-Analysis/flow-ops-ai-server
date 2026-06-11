@@ -1,6 +1,6 @@
 """시나리오 Agent의 LangGraph 그래프 정의.
 
-그래프 흐름 (목표):
+그래프 흐름:
 
     START
       → intent_parser
@@ -17,12 +17,14 @@
 - recommender:   stub
 - planner:       실제 구현 (Claude 호출)
 - chainer:       실제 구현 (Claude 호출)
-- dedup:         (다음 단계) — 아직 미연결
+- dedup:         실제 구현 + 연결 완료 (LLM 없음). existing_test_cases와 비교해
+                 중복 step에 duplicate=True 플래그. final_scenarios를 비파괴적으로 갱신.
 - validator:     실제 구현 (LLM 없음, 비파괴적). 스키마/체이닝 경로 정합성 검증
 - risk:          실제 구현 (LLM 없음, 규칙 기반)
 
-NOTE: dedup이 아직 미구현이라 현재 엣지는 chainer → validator → risk 로 둔다.
-      dedup 구현 후 chainer → dedup → validator → risk 로 바꾼다.
+NOTE: dedup은 chained_variables가 채워진 뒤(body 주입 필드까지 봐야 매칭) 돌아야 하므로
+      chainer 다음에 둔다. validator/risk는 duplicate 플래그와 무관하게 final_scenarios만
+      읽으므로 dedup 뒤 순서는 영향 없음.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from app.agents.scenario.nodes._stubs import (
     route_after_intent,
 )
 from app.agents.scenario.nodes.chainer import make_chainer_node
+from app.agents.scenario.nodes.dedup import dedup_node
 from app.agents.scenario.nodes.planner import make_planner_node
 from app.agents.scenario.nodes.risk import risk_node
 from app.agents.scenario.nodes.validator import validator_node
@@ -58,6 +61,7 @@ def build_graph(llm: LLMClient) -> StateGraph:
     graph.add_node("recommender", recommender_node)
     graph.add_node("planner", make_planner_node(llm))
     graph.add_node("chainer", make_chainer_node(llm))
+    graph.add_node("dedup", dedup_node)
     graph.add_node("validator", validator_node)
     graph.add_node("risk", risk_node)
 
@@ -73,7 +77,8 @@ def build_graph(llm: LLMClient) -> StateGraph:
     )
     graph.add_edge("recommender", "planner")
     graph.add_edge("planner", "chainer")
-    graph.add_edge("chainer", "validator")  # dedup 구현 후: chainer → dedup → validator
+    graph.add_edge("chainer", "dedup")
+    graph.add_edge("dedup", "validator")
     graph.add_edge("validator", "risk")
     graph.add_edge("risk", END)
 

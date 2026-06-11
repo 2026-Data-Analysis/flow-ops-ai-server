@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from .api_spec import APIInventory
 from .common import RiskLevel, TestLevel
-from .testcase import DraftType, TestCase
+from .testcase import DraftType, ExistingTestCase 
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ class ScenarioStep(BaseModel):
 
     requestSpec: dict[str, Any] | None = Field(
         default=None,
-        description="요청 스펙. {method, pathParams, queryParams, body}. "
+        description="요청 스펙. {method, path, pathParams, queryParams, body, headers}. "
                     "body의 고정값 위에 chained_variables가 동적으로 덮어쓴다.",
     )
     expectedSpec: dict[str, Any] | None = Field(
@@ -261,10 +261,11 @@ class ScenarioGenerationRequest(BaseModel):
 
     # 공통: 시나리오 생성의 재료
     api_inventory: APIInventory = Field(description="이 프로젝트의 전체 API 목록")
-    existing_test_cases: list[TestCase] = Field(
-        default_factory=list,
-        description="기존 단건 테스트 이력. 추천 모드/중복 제거에서 사용",
-    )
+    # ScenarioGenerationRequest 안:
+    existing_test_cases: list[ExistingTestCase] = Field(
+    default_factory=list,
+    description="기존 단건 테스트 이력(백엔드 표준 모델). 추천 모드/중복 제거에서 사용",
+)
     existing_scenarios: list[ExistingScenarioSignature] = Field(
         default_factory=list,
         description="기존 시나리오 요약(이름 + step apiId 순서). 동일/유사 흐름 중복 생성을 막기 위해 사용.",

@@ -66,7 +66,7 @@ class PlannerStep(BaseModel):
 
     requestSpec: dict[str, Any] | None = Field(
         default=None,
-        description="요청 스펙 {method, pathParams, queryParams, body}. "
+        description="요청 스펙 {method, path, pathParams, queryParams, body, headers}. "
                     "고정값만. 이전 응답에서 받아올 동적값은 넣지 말 것(chainer가 처리)",
     )
     expectedSpec: dict[str, Any] | None = Field(

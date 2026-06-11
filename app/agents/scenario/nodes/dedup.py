@@ -8,13 +8,17 @@
 
 설계 결정:
 1. 공용 fingerprint(app.core.fingerprint.make_fingerprint)로 testcase와 동일 기준 사용.
-2. 시나리오 step의 'body 필드'는 정적 requestSpec.body 필드 + chained_variables로
+2. 기존 테스트는 백엔드 표준 모델인 ExistingTestCase(type=DraftType, camelCase)로 받는다.
+   - testcase 에이전트가 받는 existingTestCases와 동일 모델이라 두 에이전트가 정렬됨.
+   - 지문 축은 DraftType. 시나리오 step도 st.type(DraftType)으로 같은 축을 쓴다.
+   - body는 requestSpec['body']에서 꺼낸다(requestSpec는 {method,path,body,...} 래퍼).
+3. 시나리오 step의 'body 필드'는 정적 requestSpec.body 필드 + chained_variables로
    body에 주입되는 필드를 합쳐서 계산한다.
    (userId 등 동적 값은 정적 body엔 없고 체이닝으로 들어오므로, 합치지 않으면
     전체 body를 가진 기존 테스트와 매칭되지 않음)
-3. 중복은 '플래그만' 세팅하고 step을 제거하지 않는다. 시나리오 실행 시 그 step은
+4. 중복은 '플래그만' 세팅하고 step을 제거하지 않는다. 시나리오 실행 시 그 step은
    여전히 호출되어야 하기 때문. duplicate는 '새 테스트케이스 생성 여부' 신호일 뿐.
-4. 같은 응답 배치 안에서 동일 step이 또 나오면(예: 여러 시나리오의 로그인) 두 번째부터
+5. 같은 응답 배치 안에서 동일 step이 또 나오면(예: 여러 시나리오의 로그인) 두 번째부터
    duplicate=True (기존 seen에 누적). 시나리오 단위로 리셋하고 싶으면 _dedup_scenarios
    안에서 seen 초기화 위치만 바꾸면 됨.
 """
@@ -23,7 +27,8 @@ from __future__ import annotations
 
 from app.agents.scenario.state import ScenarioAgentState
 from app.core.fingerprint import make_fingerprint
-from app.schemas import Scenario, ScenarioStep, TestCase
+from app.schemas import Scenario, ScenarioStep
+from app.schemas.testcase import ExistingTestCase
 
 
 def dedup_node(state: ScenarioAgentState) -> dict:
@@ -43,13 +48,18 @@ def dedup_node(state: ScenarioAgentState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _existing_fingerprints(existing: list[TestCase]) -> set[frozenset]:
-    """기존 테스트케이스들의 지문 집합."""
+def _existing_fingerprints(existing: list[ExistingTestCase]) -> set[frozenset]:
+    """기존 테스트케이스들의 지문 집합.
+
+    ExistingTestCase는 type=DraftType, requestSpec={method,path,body,...} 형태다.
+    body는 requestSpec['body']에서 꺼낸다(requestSpec 자체가 body가 아님).
+    """
     fps: set[frozenset] = set()
     for tc in existing:
-        body = tc.request_payload if isinstance(tc.request_payload, dict) else {}
+        body = (tc.requestSpec or {}).get("body")
+        body = body if isinstance(body, dict) else {}
         fps.add(make_fingerprint(
-            api_id=tc.endpoint_id,
+            api_id=tc.apiId,
             test_case_type=tc.type.value,
             body_fields=body.keys(),
         ))
@@ -68,7 +78,7 @@ def _dedup_scenarios(
         for st in sc.steps:
             fp = make_fingerprint(
                 api_id=st.apiId,
-                test_case_type=(st.test_case_type.value if st.test_case_type else ""),
+                test_case_type=st.type.value,
                 body_fields=_step_body_fields(st),
             )
             is_dup = fp in seen
