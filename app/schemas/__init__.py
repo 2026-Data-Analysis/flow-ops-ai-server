@@ -4,9 +4,10 @@
 """
 from .testcase import DraftType, TestCaseType, TestCase
 from .api_spec import APIEndpoint, APIInventory, AuthScheme, ParameterSpec
-from .common import AgentResponse, HttpMethod, RiskLevel, TokenUsage
+from .common import AgentResponse, HttpMethod, RiskLevel, TestLevel, TokenUsage
 from .scenario import (
     ChainedVariable,
+    ExistingScenarioSignature,
     Scenario,
     ScenarioGenerationMode,
     ScenarioGenerationRequest,
@@ -36,6 +37,7 @@ __all__ = [
     "AgentResponse",
     "HttpMethod",
     "RiskLevel",
+    "TestLevel",
     "TokenUsage",
     # api_spec
     "APIEndpoint",
@@ -59,6 +61,7 @@ __all__ = [
     "TestCaseGenerationResponse",
     # scenario
     "ChainedVariable",
+    "ExistingScenarioSignature",
     "Scenario",
     "ScenarioGenerationMode",
     "ScenarioGenerationRequest",

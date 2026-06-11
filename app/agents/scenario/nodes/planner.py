@@ -10,6 +10,10 @@ LLM 출력 → 검증 → Scenario 객체 조립 → State 갱신.
   endpoint_id→apiId, name→title, static_payload/static_params→requestSpec,
   expected_status_code/expected_assertions→expectedSpec/assertionSpec.
 - LLM이 type/requestSpec/expectedSpec/assertionSpec을 직접 채운다.
+- 시나리오 단위로 대표 type과 test_level을 LLM이 직접 산정하고,
+  조립 시 Scenario.test_level / meta.test_level에 동일 값을 주입한다.
+- request.existing_scenarios로 받은 기존 시나리오 시그니처(step apiId 순서)와
+  중복되는 생성 결과는 조립 단계에서 제외한다(이번 배치 내 중복도 함께 제거).
 """
 
 from __future__ import annotations
@@ -25,10 +29,12 @@ from app.llm.prompts.scenario_planner import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import (
     APIInventory,
     DraftType,
+    ExistingScenarioSignature,
     Scenario,
     ScenarioGenerationMode,
     ScenarioMeta,
     ScenarioStep,
+    TestLevel,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +87,13 @@ class PlannerScenario(BaseModel):
         description=(
             "이 시나리오의 대표 type. steps의 type 중 흐름의 핵심 의도를 가장 잘 나타내는 1개를 "
             "직접 고르세요(무작위 금지). 모든 스텝이 정상 흐름이면 HAPPY_PATH."
+        ),
+    )
+    test_level: TestLevel = Field(
+        description=(
+            "이 시나리오의 테스트 레벨(SMOKE / SANITY / REGRESSION / FULL_SUITE). "
+            "흐름의 범위·중요도를 보고 직접 산정하세요. 예: 핵심 happy-path 빠른 점검은 SMOKE, "
+            "여러 기능을 폭넓게 검증하는 흐름은 REGRESSION/FULL_SUITE."
         ),
     )
     steps: list[PlannerStep]
@@ -157,8 +170,8 @@ def make_planner_node(llm: LLMClient):
                 "token_usages": [usage],
             }
 
-        # apiId, ref 검증 + Scenario 조립
-        scenarios, errs = _assemble_scenarios(parsed, inventory)
+        # apiId, ref 검증 + 중복 제외 + Scenario 조립
+        scenarios, errs = _assemble_scenarios(parsed, inventory, request.existing_scenarios)
 
         return {
             "planned_scenarios": scenarios,
@@ -177,14 +190,23 @@ def make_planner_node(llm: LLMClient):
 def _assemble_scenarios(
     parsed: PlannerOutput,
     inventory: APIInventory,
+    existing_scenarios: list[ExistingScenarioSignature] | None = None,
 ) -> tuple[list[Scenario], list[AgentError]]:
     """LLM이 만든 PlannerOutput을 검증하고 진짜 Scenario 객체로 변환.
 
     검증 실패한 시나리오는 결과에서 제외하고 에러만 기록.
+    기존/직전 시나리오와 step apiId 순서가 같은 중복 시나리오는 제외(logger.info)한다.
     """
     valid_ids = set(inventory.by_id().keys())
     scenarios: list[Scenario] = []
     errors: list[AgentError] = []
+
+    # dedup 키: step apiId를 실행 순서대로 나열한 튜플.
+    # 기존 시나리오 시그니처로 초기화하고, 이번 배치에서 채택한 것도 누적해
+    # 배치 내부 중복까지 함께 제거한다. (이름은 LLM이 바꾸기 쉬워 키로 쓰지 않음)
+    seen_sigs: set[tuple[str, ...]] = {
+        tuple(sig.step_api_ids) for sig in (existing_scenarios or [])
+    }
 
     for ps in parsed.scenarios:
         # ref 중복 검사
@@ -217,6 +239,16 @@ def _assemble_scenarios(
             ))
             continue
 
+        # 중복(기존/직전과 step apiId 순서 동일) 제외
+        signature = tuple(s.apiId for s in sorted_steps)
+        if signature in seen_sigs:
+            logger.info(
+                "시나리오 '%s': step apiId 순서가 기존/직전 시나리오와 중복되어 제외 - %s",
+                ps.name, list(signature),
+            )
+            continue
+        seen_sigs.add(signature)
+
         # 진짜 Scenario 객체로 변환
         steps = [
             ScenarioStep(
@@ -240,8 +272,9 @@ def _assemble_scenarios(
             name=ps.name,
             description=ps.description,
             type=_resolve_representative_type(ps),
+            test_level=ps.test_level,
             steps=steps,
-            meta=ScenarioMeta(rationale=ps.rationale),
+            meta=ScenarioMeta(rationale=ps.rationale, test_level=ps.test_level),
         ))
 
     return scenarios, errors

@@ -17,6 +17,8 @@
         NORMAL/EXCEPTION/BOUNDARY가 필요하면 호출 측에서 DRAFT_TO_TEST_CASE_TYPE로 매핑.
 [4단계] test_level(TestLevel) 추가 — meta + Scenario 최상위 양쪽에, planner가 직접 산정
         (현서 피드백 1-2/1-3). estimated_risk(위험도 심각도)는 별개 축이며 선택값으로 분리.
+[5단계] 요청에 existing_scenarios(이름 + step apiId 순서) 추가 — 중복 시나리오 생성 방지(dedup)용.
+        planner 후처리에서 step apiId 순서가 일치하는 생성 결과를 걸러낸다.
 """
 
 from __future__ import annotations
@@ -223,6 +225,25 @@ class Scenario(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ExistingScenarioSignature(BaseModel):
+    """중복 생성 방지(dedup)용 기존 시나리오 요약.
+
+    전체 시나리오가 아니라 식별에 필요한 최소 정보만 받는다:
+    시나리오 이름 + step들의 apiId를 order대로 나열한 리스트.
+    dedup의 신뢰 키는 step_api_ids 순서다(이름은 LLM이 바꾸기 쉬움).
+
+    NOTE: step_api_ids는 api_inventory의 endpoint_id(= ScenarioStep.apiId)와
+    동일한 식별자여야 비교가 성립한다. 백엔드가 숫자 DB id로 보내면 매칭되지 않으므로
+    문자열 endpoint_id로 통일 필요 (현서님 확인 대기).
+    """
+
+    name: str = Field(description="기존 시나리오 이름")
+    step_api_ids: list[str] = Field(
+        default_factory=list,
+        description="기존 시나리오 step들의 apiId를 실행 순서(order)대로 나열. dedup 비교의 핵심 키",
+    )
+
+
 class ScenarioGenerationRequest(BaseModel):
     """시나리오 Agent의 입력.
 
@@ -243,6 +264,10 @@ class ScenarioGenerationRequest(BaseModel):
     existing_test_cases: list[TestCase] = Field(
         default_factory=list,
         description="기존 단건 테스트 이력. 추천 모드/중복 제거에서 사용",
+    )
+    existing_scenarios: list[ExistingScenarioSignature] = Field(
+        default_factory=list,
+        description="기존 시나리오 요약(이름 + step apiId 순서). 동일/유사 흐름 중복 생성을 막기 위해 사용.",
     )
 
     # 옵션
