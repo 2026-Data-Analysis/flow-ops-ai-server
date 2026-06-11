@@ -7,6 +7,7 @@
 - 스텝 출력이 TestCaseDraft 호환 필드로 바뀜
   (apiId/title/type/requestSpec/expectedSpec/assertionSpec).
 - 변수 체이닝은 별도 단계(Response Chainer)가 처리하므로 여기서는 만들지 않음.
+- 시나리오 단위로 대표 type과 test_level(SMOKE/SANITY/REGRESSION/FULL_SUITE)을 직접 산정.
 """
 
 from __future__ import annotations
@@ -37,6 +38,20 @@ SYSTEM_PROMPT = """\
    - 추측값(appId="1" 등)을 하드코딩하면 실제 실행 시 그 리소스가 없어 404가 날 수 있으니 피하세요.
    ⚠️ 예외: 음성 케이스(VALIDATION/EDGE_CASE 등에서 일부러 없는/invalid ID로 4xx를 유도)는
       조회 스텝을 추가하지 말고, 의도한 invalid 값을 그대로 두세요. (음성 케이스 requestSpec 규칙과 일치)
+
+각 시나리오(scenario)가 채워야 할 필드:
+- name: 시나리오 이름 (한글).
+- description: 시나리오 설명 (한글).
+- rationale: 왜 이 흐름을 만들었는지 한 줄 설명.
+- type: 이 시나리오의 '대표 type'. 아래 step type 중 흐름의 핵심 의도를 가장 잘 나타내는 1개를
+    직접 고르세요(무작위 금지). 모든 스텝이 정상 흐름이면 HAPPY_PATH, 인증 실패 검증이 핵심이면
+    AUTHORIZATION 처럼 흐름의 의도에 맞춰 고릅니다.
+- test_level: 이 시나리오의 테스트 레벨. 흐름의 범위·중요도를 보고 다음 중 하나를 직접 고르세요.
+    SMOKE       핵심 happy-path를 빠르게 한 번 훑는 최소 점검 (범위 가장 좁음)
+    SANITY      특정 기능/변경점이 정상 동작하는지 좁게 확인
+    REGRESSION  여러 기능을 폭넓게 재검증 (정상 + 음성 흐름이 섞인 경우 적합)
+    FULL_SUITE  전체 흐름을 가장 넓게 커버 (범위 가장 넓음)
+  · test_level은 시나리오마다 1개입니다(스텝별이 아님).
 
 각 스텝(step)이 채워야 할 필드:
 - ref: 'step_1', 'step_2'처럼 순번을 매기되 한 시나리오 안에서 유일해야 합니다.

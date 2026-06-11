@@ -23,7 +23,27 @@ class HttpMethod(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    """위험도 레벨 (제안서 2.2 비교표 'AI 위험도 분류' 항목과 일치)."""
+    """위험도 심각도 레벨 (제안서 2.2 비교표 'AI 위험도 분류' 항목과 일치).
+
+    테스트 레벨(TestLevel)과는 다른 축이다. 이 enum은 '문제 발생 시 영향도'를
+    나타내며, 위험도 분류 에이전트(app/core/risk.py의 assess_risk)가 산정한다.
+    """
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class TestLevel(str, Enum):
+    """테스트 레벨 (smoke / sanity / regression / full suite).
+
+    RiskLevel(위험도 심각도)과는 별개의 축이다. 시나리오·테스트케이스의
+    '어느 범위의 테스트인지'를 나타낸다.
+
+    NOTE: testcase.py의 testLevel은 현재 자유문자열(str)이므로,
+    백엔드 Classifier가 사용하는 문자열 값과 표기가 일치해야 한다.
+    """
 
     SMOKE = "SMOKE"
     SANITY = "SANITY"

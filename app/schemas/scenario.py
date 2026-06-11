@@ -15,6 +15,8 @@
 [3단계] test_case_type(NORMAL/EXCEPTION/BOUNDARY 매핑값) 제거.
         위험도 분류가 아니라 type(DraftType)의 단순 파생값이라 응답에 불필요 (현서 피드백 반영).
         NORMAL/EXCEPTION/BOUNDARY가 필요하면 호출 측에서 DRAFT_TO_TEST_CASE_TYPE로 매핑.
+[4단계] test_level(TestLevel) 추가 — meta + Scenario 최상위 양쪽에, planner가 직접 산정
+        (현서 피드백 1-2/1-3). estimated_risk(위험도 심각도)는 별개 축이며 선택값으로 분리.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from .api_spec import APIInventory
-from .common import RiskLevel
+from .common import RiskLevel, TestLevel
 from .testcase import DraftType, TestCase
 
 
@@ -172,6 +174,9 @@ class ScenarioMeta(BaseModel):
     """추천 모드에서 채워지는 메타.
 
     자연어 모드에서는 rationale만 채우고 coverage_gap은 비움.
+    test_level은 planner가 직접 산정한다(현서 피드백 1-3).
+    estimated_risk는 위험도 심각도(LOW/MEDIUM/HIGH/CRITICAL)로 test_level과는
+    다른 축이며, 시나리오 단계에서는 필수가 아니다(없어도 됨). 추후 risk 노드가 채울 수 있다.
     """
 
     rationale: str = Field(description="이 시나리오를 만든·추천한 이유 (사람이 읽을 수 있게)")
@@ -179,10 +184,14 @@ class ScenarioMeta(BaseModel):
         default=None,
         description="추천 모드 한정. 어떤 커버리지 갭을 메우는지. 예: '결제 실패 후 재시도 흐름 없음'",
     )
-    estimated_risk: RiskLevel = Field(
-        default=RiskLevel.SANITY,
-        description="이 시나리오에서 문제 발생 시 영향도(시나리오 단위). 값은 대문자 enum(LOW/MEDIUM/HIGH/CRITICAL). "
-                    "risk 노드가 app/core/risk.py의 공용 assess_risk로 산정.",
+    test_level: TestLevel = Field(
+        description="테스트 레벨(SMOKE/SANITY/REGRESSION/FULL_SUITE). planner가 직접 산정. "
+                    "Scenario.test_level과 동일 값.",
+    )
+    estimated_risk: RiskLevel | None = Field(
+        default=None,
+        description="위험도 심각도(LOW/MEDIUM/HIGH/CRITICAL). test_level과는 다른 축. "
+                    "시나리오 단계에선 선택값(없어도 됨)이며, 추후 risk 노드(assess_risk)가 채운다.",
     )
 
 
@@ -199,6 +208,10 @@ class Scenario(BaseModel):
     # steps[*].type 중 흐름의 핵심 의도를 대표하는 1개. planner LLM이 직접 고름.
     type: DraftType = Field(
         description="시나리오 대표 type. steps의 type 중 흐름의 핵심 의도를 대표하는 1개",
+    )
+    # 테스트 레벨. planner가 직접 산정 (meta.test_level과 동일 값).
+    test_level: TestLevel = Field(
+        description="테스트 레벨(SMOKE/SANITY/REGRESSION/FULL_SUITE). planner가 직접 산정",
     )
 
     steps: list[ScenarioStep]

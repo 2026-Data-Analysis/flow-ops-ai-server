@@ -19,6 +19,9 @@ APIEndpoint.response_schema는 두 형태를 가질 수 있다:
 
 이 모듈은 두 형태를 모두 받아 일관된 값을 돌려준다 (backward-compatible).
 시나리오/테스트 양쪽 소비부(chainer/validator/planner + testcase)에서 동일하게 재사용한다.
+
+responses[]의 category는 백엔드가 파생시키는 커스텀 필드라 대소문자 차이/누락 가능성이 있다.
+_category()가 이를 흡수한다: 명시되면 대문자로 정규화, 없으면 statusCode로 추론(2xx=SUCCESS).
 """
 
 from __future__ import annotations
@@ -40,6 +43,28 @@ def _to_int(v: Any) -> int | None:
         return None
 
 
+def _unique_ints(values: Any) -> list[int]:
+    """int로 변환 가능한 값만 추려 순서 보존 중복 제거."""
+    out = [c for c in (_to_int(x) for x in values) if c is not None]
+    return list(dict.fromkeys(out))
+
+
+def _category(r: dict) -> str | None:
+    """response 항목의 category.
+
+    - 명시돼 있으면 대문자로 정규화 (대소문자 차이 흡수).
+    - 없으면 statusCode로 추론: 2xx → SUCCESS, 그 외 → ERROR.
+    - statusCode도 없으면 None.
+    """
+    cat = r.get("category")
+    if isinstance(cat, str):
+        return cat.upper()
+    code = _to_int(r.get("statusCode"))
+    if code is None:
+        return None
+    return "SUCCESS" if 200 <= code < 300 else "ERROR"
+
+
 def success_schema(response_schema: Any) -> dict[str, Any] | None:
     """체이닝/검증에 쓸 '성공 응답' schema.
 
@@ -50,7 +75,7 @@ def success_schema(response_schema: Any) -> dict[str, Any] | None:
         return None
     if _is_new_form(response_schema):
         for r in response_schema.get("responses", []) or []:
-            if isinstance(r, dict) and r.get("category") == "SUCCESS":
+            if isinstance(r, dict) and _category(r) == "SUCCESS":
                 sch = r.get("schema")
                 return sch if isinstance(sch, dict) else None
         return None
@@ -62,19 +87,15 @@ def expected_status_codes(response_schema: Any) -> list[int]:
     if isinstance(response_schema, dict) and _is_new_form(response_schema):
         codes = response_schema.get("expectedStatusCodes")
         if isinstance(codes, list):
-            out = [c for c in (_to_int(x) for x in codes) if c is not None]
+            out = _unique_ints(codes)
             if out:
                 return out
         # expectedStatusCodes가 없으면 responses의 SUCCESS에서 추출
-        out = [
-            c
-            for c in (
-                _to_int(r.get("statusCode"))
-                for r in response_schema.get("responses", []) or []
-                if isinstance(r, dict) and r.get("category") == "SUCCESS"
-            )
-            if c is not None
-        ]
+        out = _unique_ints(
+            r.get("statusCode")
+            for r in response_schema.get("responses", []) or []
+            if isinstance(r, dict) and _category(r) == "SUCCESS"
+        )
         if out:
             return out
     return [200]
@@ -86,7 +107,7 @@ def error_responses(response_schema: Any) -> list[dict[str, Any]]:
         return [
             r
             for r in response_schema.get("responses", []) or []
-            if isinstance(r, dict) and r.get("category") == "ERROR"
+            if isinstance(r, dict) and _category(r) == "ERROR"
         ]
     return []
 
@@ -96,12 +117,8 @@ def error_status_codes(response_schema: Any) -> list[int]:
     if isinstance(response_schema, dict) and _is_new_form(response_schema):
         codes = response_schema.get("errorStatusCodes")
         if isinstance(codes, list):
-            out = [c for c in (_to_int(x) for x in codes) if c is not None]
+            out = _unique_ints(codes)
             if out:
                 return out
-        return [
-            c
-            for c in (_to_int(r.get("statusCode")) for r in error_responses(response_schema))
-            if c is not None
-        ]
+        return _unique_ints(r.get("statusCode") for r in error_responses(response_schema))
     return []

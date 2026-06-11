@@ -43,6 +43,13 @@ class APIEndpoint(BaseModel):
     Shared Memory 키는 endpoint_id로 관리한다.
     request_body_schema/response_schema는 JSON Schema 그대로 받는다
     (LLM이 JSON Schema를 잘 이해하므로 변환하지 않음).
+
+    response_schema는 두 형태를 모두 허용한다(backward-compatible):
+    - [구] 단일 성공 응답 JSON Schema
+    - [신] OpenAPI responses 요약 {expectedStatusCodes, errorStatusCodes, responses[]}
+    어느 형태든 해석은 app/core/response_spec.py의 헬퍼(success_schema,
+    expected_status_codes, error_status_codes 등)로 통일한다. 소비부(planner/
+    chainer/validator/testcase)가 키를 직접 파싱하지 말 것 — 형태 분기가 한 곳에 모이도록.
     """
 
     endpoint_id: str = Field(description="고유 식별자, 예: 'POST:/api/v1/users'")
@@ -58,7 +65,12 @@ class APIEndpoint(BaseModel):
     )
     response_schema: dict[str, Any] | None = Field(
         default=None,
-        description="JSON Schema 형식의 응답 바디 명세 (200 응답 기준)",
+        description=(
+            "응답 명세. 두 형태를 모두 허용한다(backward-compatible). "
+            "[구] 단일 성공 응답 JSON Schema(200 기준). "
+            "[신] OpenAPI responses 요약 {expectedStatusCodes, errorStatusCodes, responses[]}. "
+            "해석은 app/core/response_spec.py 헬퍼로 통일(직접 키 파싱 금지)."
+        ),
     )
 
     auth: AuthScheme | None = None
