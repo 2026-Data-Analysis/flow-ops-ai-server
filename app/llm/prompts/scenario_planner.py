@@ -107,14 +107,21 @@ def build_user_prompt(
     inventory: APIInventory,
     max_scenarios: int,
     max_steps_per_scenario: int,
+    endpoint_ids: list[str] | None = None,
 ) -> str:
     """user 프롬프트를 조립.
 
     API 목록은 LLM이 이해하기 쉽도록 간결한 텍스트로 직렬화.
     (전체 JSON Schema를 그대로 넣으면 토큰만 잡아먹고 정확도가 떨어짐.)
     """
+    if endpoint_ids:
+        allow = set(endpoint_ids)
+        endpoints = [ep for ep in inventory.endpoints if ep.endpoint_id in allow]
+    else:
+        endpoints = inventory.endpoints
+
     api_lines: list[str] = []
-    for ep in inventory.endpoints:
+    for ep in endpoints:
         line = f"- {ep.endpoint_id}  (path 템플릿: {ep.path})"
         if ep.summary:
             line += f"  ({ep.summary})"
