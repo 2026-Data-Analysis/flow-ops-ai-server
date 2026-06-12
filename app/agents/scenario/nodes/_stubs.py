@@ -27,14 +27,6 @@ def intent_parser_node(state: ScenarioAgentState) -> dict:
     return {"route": route}
 
 
-def recommender_node(state: ScenarioAgentState) -> dict:
-    """추천 모드 한정: 기존 테스트 이력 기반으로 부족한 시나리오 도출.
-
-    STUB: 현재는 빈 갭 리스트 반환.
-    """
-    return {"coverage_gaps": []}
-
-
 def route_after_intent(state: ScenarioAgentState) -> str:
     """intent_parser 다음 분기를 결정하는 conditional edge 함수.
 
