@@ -69,7 +69,7 @@ def make_dispatcher_node(
                 if agent_type == "testcase":
                     result = _run_testcase(testcase_graph, llm, project_id, context, intent, state)
                 elif agent_type == "scenario":
-                    result = _run_scenario(scenario_graph, project_id, context, intent)
+                    result = _run_scenario(scenario_graph, project_id, context, intent, state)
                 elif agent_type == "incident":
                     result = _run_incident(incident_graph, project_id, context, intent)
                 elif agent_type == "application":
@@ -202,73 +202,41 @@ def _run_testcase(graph, llm, project_id: str, context: dict, intent: dict, stat
     return _generate_testcase(graph, llm, project_id, context, apis, existing_test_cases)
 
 
-def _run_scenario(graph, project_id: str, context: dict, intent: dict) -> AgentCallResult:
-    from app.schemas.api_spec import APIInventory
+def _run_scenario(graph, project_id: str, context: dict, intent: dict, state: OrchestratorAgentState) -> AgentCallResult:
+    user_intent = intent.get("user_intent") or context.get("user_intent") or intent.get("reason", "")
 
     api_inventory_dict = context.get("api_inventory")
-    if not api_inventory_dict:
-        return AgentCallResult(
-            agent_type="scenario", success=False, data=None,
-            error_message="scenario Agent 실행에 api_inventory가 필요합니다.",
+
+    if api_inventory_dict:
+        logger.info("[scenarios] api_inventory 사용 (naturalLanguageScenarioRequest 미사용)")
+        nlsr = {
+            "mode": "NATURAL_LANGUAGE",
+            "api_inventory": api_inventory_dict,
+            "existing_test_cases": [],
+            "existing_scenarios": [],
+            "max_scenarios": context.get("max_scenarios", 2),
+            "max_steps_per_scenario": context.get("max_steps_per_scenario", 5),
+        }
+    else:
+        api_server_url = context.get("api_server_url")
+        if not api_server_url:
+            return AgentCallResult(
+                agent_type="scenario", success=False, data=None,
+                error_message="scenario Agent 실행에 api_inventory 또는 api_server_url이 필요합니다.",
+            )
+
+        _, nlsr = _fetch_all_from_server(
+            api_server_url=api_server_url,
+            project_id=project_id,
         )
 
-    try:
-        inventory = APIInventory.model_validate(api_inventory_dict)
-    except Exception as e:
+    if not nlsr or not nlsr.get("api_inventory", {}).get("endpoints"):
         return AgentCallResult(
             agent_type="scenario", success=False, data=None,
-            error_message=f"api_inventory 파싱 실패: {e}",
+            error_message="API 목록을 조회하지 못했습니다.",
         )
 
-    user_intent = intent.get("user_intent") or context.get("user_intent") or intent.get("reason", "")
-    logger.info(f"[scenario] 시나리오 생성 시작 — intent: {user_intent[:60]}")
-
-    request = ScenarioGenerationRequest(
-        project_id=project_id,
-        mode=ScenarioGenerationMode.NATURAL_LANGUAGE,
-        user_intent=user_intent,
-        api_inventory=inventory,
-    )
-
-    trace_id = f"trace_{uuid.uuid4().hex[:12]}"
-    init = scenario_initial_state(request, trace_id=trace_id)
-    final = graph.invoke(init)
-
-    final_scenarios = final.get("final_scenarios", [])
-    errors = final.get("errors", [])
-
-    if not final_scenarios:
-        logger.warning(f"[scenario] 시나리오 생성 실패: {errors[0]['message'] if errors else '알 수 없는 오류'}")
-        return AgentCallResult(
-            agent_type="scenario", success=False, data=None,
-            error_message=errors[0]["message"] if errors else "시나리오 생성 실패",
-        )
-
-    used_endpoints = list({st.endpoint_id for s in final_scenarios for st in s.steps})
-    logger.info(f"[scenario] 생성 완료 → {len(final_scenarios)}개 시나리오, "
-                f"사용 API {len(used_endpoints)}개")
-
-    return AgentCallResult(
-        agent_type="scenario",
-        success=True,
-        data={
-            "scenarios": [s.model_dump() for s in final_scenarios],
-            "used_endpoint_ids": used_endpoints,
-        },
-        error_message=None,
-        action={
-            "type": "confirm_save",
-            "label": "시나리오 저장",
-            "description": f"{len(final_scenarios)}개 시나리오를 저장하시겠습니까?",
-            "endpoint": "/api/v1/scenarios",
-            "method": "POST",
-            "payload": {
-                "projectId": project_id,
-                "scenarios": [s.model_dump() for s in final_scenarios],
-            },
-        },
-    )
-
+    return _generate_scenarios(graph, project_id, user_intent, nlsr)
 
 def _run_incident(graph, project_id: str, context: dict, intent: dict) -> AgentCallResult:
     from app.schemas.incident import IncidentAnalysisRequest
@@ -440,6 +408,7 @@ def _fetch_similar_apis_from_server(
             f"{api_server_url}/ai/agents/api-inventories",
             params=params,
             timeout=60.0,
+            headers={"Accept-Encoding": "gzip, deflate"},
         )
         response.raise_for_status()
         raw = response.json()
@@ -450,6 +419,10 @@ def _fetch_similar_apis_from_server(
 
         logger.info(f"[testcase] 서버에서 API {len(api_list)}개, 기존 testcase {len(test_cases)}개 조회됨")
 
+        # ✅ llm이 None이면 필터링 없이 전체 반환
+        if llm is None:
+            return api_list, test_cases
+
         selected_apis = _filter_similar_apis(api_list, user_prompt, llm)
         return selected_apis, test_cases
 
@@ -457,11 +430,10 @@ def _fetch_similar_apis_from_server(
         logger.error(f"[testcase] 서버 API 조회 실패: {e}")
         return [], []
 
-
-def _filter_similar_apis(api_list: list[dict], user_prompt: str, llm) -> list[dict]:
+def _filter_similar_apis(api_list: list[dict], user_prompt: str, llm, max_count: int = 5) -> list[dict]:  # ✅ max_count 파라미터 추가
     if not api_list:
         return []
-    if len(api_list) <= 5:
+    if len(api_list) <= max_count:
         return api_list
 
     from pydantic import BaseModel
@@ -478,7 +450,16 @@ def _filter_similar_apis(api_list: list[dict], user_prompt: str, llm) -> list[di
 
     try:
         raw_output, _ = llm.generate_structured(
-            system="사용자 요청과 가장 관련성 높은 API를 최대 5개 선택하세요. selected_indices에 인덱스 번호를 반환하세요.",
+            system=f"""사용자 요청과 가장 관련성 높은 API를 최대 {max_count}개 선택하세요.
+
+선택 원칙:
+- 사용자 요청의 핵심 도메인과 직접 관련된 API만 선택하세요.
+- 예: "시나리오 관련 테스트 케이스 생성" → 시나리오 도메인 API만 선택 (name에 시나리오 언급)
+- 예: "주문 테스트 케이스 생성" → 주문 도메인 API만 선택 (name에 주문 언급)
+- 요청과 간접적으로만 관련된 API는 제외하세요.
+- 예: "시나리오 관련 테스트 케이스 생성" → 테스트 케이스 생성했다고 테스트 관련 API 선택하면 안됩니다. 
+- 최대 {max_count}개를 초과하여 선택하지 마세요.
+- selected_indices에 선택한 API의 인덱스 번호를 반환하세요.""",
             user=f"사용자 요청: {user_prompt}\n\nAPI 목록:\n{api_summary}",
             output_schema=_FilterOutput.model_json_schema(),
             output_name="emit_selected_apis",
@@ -488,13 +469,14 @@ def _filter_similar_apis(api_list: list[dict], user_prompt: str, llm) -> list[di
         )
         parsed = _FilterOutput.model_validate(raw_output)
         selected = [api_list[i] for i in parsed.selected_indices if i < len(api_list)]
-        logger.info(f"[testcase] LLM이 {len(selected)}개 API 선택: "
-                    f"{[api_list[i].get('path') or api_list[i].get('endpointPath') for i in parsed.selected_indices if i < len(api_list)]}")
+        # ✅ LLM이 max_count 초과하더라도 코드 레벨에서 한번 더 제한
+        selected = selected[:max_count]
+        logger.info(f"[testcase] LLM이 {len(selected)}개 API 선택 (최대 {max_count}개 제한): "
+                    f"{[api_list[i].get('path') or api_list[i].get('endpointPath') for i in parsed.selected_indices[:max_count] if i < len(api_list)]}")
         return selected
     except Exception as e:
-        logger.warning(f"[testcase] API 유사도 필터링 실패, 상위 5개 반환: {e}")
-        return api_list[:5]
-
+        logger.warning(f"[testcase] API 유사도 필터링 실패, 상위 {max_count}개 반환: {e}")
+        return api_list[:max_count]
 
 def _generate_testcase(
     graph, llm, project_id: str, context: dict, apis: list, existing_test_cases: list = []
@@ -625,3 +607,99 @@ def _generate_testcase(
             },
         },
     )
+
+def _generate_scenarios(graph, project_id: str, user_intent: str, nlsr: dict) -> AgentCallResult:
+    from app.schemas.scenario import ScenarioGenerationRequest
+
+    # ✅ 서버가 만들어준 naturalLanguageScenarioRequest에 project_id, user_intent만 채움
+    nlsr["project_id"] = str(project_id)
+    nlsr["user_intent"] = user_intent
+
+    try:
+        request = ScenarioGenerationRequest.model_validate(nlsr)
+    except Exception as e:
+        logger.error(f"[scenarios] ScenarioGenerationRequest 검증 실패: {e}")
+        return AgentCallResult(
+            agent_type="scenario", success=False, data=None,
+            error_message=f"요청 데이터 검증 실패: {e}",
+        )
+
+    logger.info(f"[scenarios] 시나리오 생성 시작 — "
+                f"API {len(request.api_inventory.endpoints)}개, "
+                f"기존 testcase {len(request.existing_test_cases)}개, "
+                f"기존 시나리오 {len(request.existing_scenarios)}개, "
+                f"intent: {user_intent[:60]}")
+
+    trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+    init = scenario_initial_state(request, trace_id=trace_id)
+    final = graph.invoke(init)
+
+    final_scenarios = final.get("final_scenarios", [])
+    errors = final.get("errors", [])
+
+    if not final_scenarios:
+        logger.warning(f"[scenarios] 시나리오 생성 실패: {errors[0]['message'] if errors else '알 수 없는 오류'}")
+        return AgentCallResult(
+            agent_type="scenario", success=False, data=None,
+            error_message=errors[0]["message"] if errors else "시나리오 생성 실패",
+        )
+
+    used_endpoints = list({st.apiId for s in final_scenarios for st in s.steps})
+    logger.info(f"[scenarios] 생성 완료 → {len(final_scenarios)}개 시나리오, "
+                f"사용 API {len(used_endpoints)}개")
+
+    return AgentCallResult(
+        agent_type="scenario",
+        success=True,
+        data={
+            "scenarios": [s.model_dump() for s in final_scenarios],
+            "used_endpoint_ids": used_endpoints,
+        },
+        error_message=None,
+        action={
+            "type": "confirm_save",
+            "label": "시나리오 저장",
+            "description": f"{len(final_scenarios)}개 시나리오를 저장하시겠습니까?",
+            "endpoint": "/api/v1/scenarios",
+            "method": "POST",
+            "payload": {
+                "projectId": project_id,
+                "scenarios": [s.model_dump() for s in final_scenarios],
+            },
+        },
+    )
+
+def _fetch_all_from_server(
+    api_server_url: str,
+    project_id: str | None,
+) -> tuple[list[dict], dict]:
+    """API 목록 + scenario agent용 naturalLanguageScenarioRequest 조회."""
+    import httpx
+
+    params = {"projectId": project_id}
+
+    try:
+        response = httpx.get(
+            f"{api_server_url}/ai/agents/api-inventories",
+            params=params,
+            timeout=60.0,
+            headers={"Accept-Encoding": "gzip, deflate"},
+        )
+        response.raise_for_status()
+        raw = response.json()
+
+        data = raw.get("data", {})
+        api_list = data.get("apis", [])
+        nlsr = data.get("naturalLanguageScenarioRequest", {})
+
+        logger.info(f"[scenarios] 서버에서 API {len(api_list)}개, "
+                    f"naturalLanguageScenarioRequest 조회됨 "
+                    f"(endpoints={len(nlsr.get('api_inventory', {}).get('endpoints', []))}, "
+                    f"existing_test_cases={len(nlsr.get('existing_test_cases', []))}, "
+                    f"existing_scenarios={len(nlsr.get('existing_scenarios', []))})")
+
+        return api_list, nlsr
+
+    except Exception as e:
+        logger.error(f"[scenarios] 서버 조회 실패: {e}")
+        return [], {}

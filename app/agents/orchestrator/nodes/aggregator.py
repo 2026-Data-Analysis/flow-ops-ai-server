@@ -60,18 +60,49 @@ def _success_detail(result: AgentCallResult) -> str:
     agent = result.agent_type
 
     if agent == "testcase":
-        return f"{len(data.get('drafts', []))}개 테스트 케이스 생성됨"
+        drafts = data.get("drafts", [])
+        # API별 테스트 케이스 수 집계
+        api_counts: dict = {}
+        for d in drafts:
+            api_id = d.get("apiId", "unknown")
+            api_counts[api_id] = api_counts.get(api_id, 0) + 1
+        api_summary = ", ".join(
+            f"{api_id}({count}개)" for api_id, count in api_counts.items()
+        )
+        return (
+            f"총 {len(drafts)}개 테스트 케이스 생성 "
+            f"(API {len(api_counts)}개 대상 — {api_summary})"
+        )
+
     if agent == "scenario":
         scenarios = data.get("scenarios", [])
         endpoints = data.get("used_endpoint_ids", [])
-        return f"{len(scenarios)}개 시나리오 생성됨 (사용 API {len(endpoints)}개)"
+        step_counts = [len(s.get("steps", [])) for s in scenarios]
+        avg_steps = sum(step_counts) / len(step_counts) if step_counts else 0
+        return (
+            f"총 {len(scenarios)}개 시나리오 생성 "
+            f"(사용 API {len(endpoints)}개, 평균 {avg_steps:.1f}스텝)"
+        )
+
     if agent == "incident":
         causes = data.get("root_causes", [])
         top = causes[0]["summary"] if causes else "원인 미상"
-        return f"원인 후보 {len(causes)}건 도출 — 주요 원인: {top}"
+        severities = [c.get("severity", "") for c in causes]
+        critical = severities.count("CRITICAL")
+        high = severities.count("HIGH")
+        return (
+            f"원인 후보 {len(causes)}건 도출 "
+            f"(CRITICAL {critical}건, HIGH {high}건) "
+            f"— 주요 원인: {top[:40]}"
+        )
+
     if agent in ("application", "environment", "api_management"):
-        return f"{data.get('status')} — {str(data.get('userMessage', ''))[:40]}"
+        status = data.get("status", "")
+        user_message = str(data.get("userMessage", ""))[:60]
+        return f"{status} — {user_message}"
+
     if agent == "general":
         answer = data.get("answer", "")
-        return answer[:50] + "..." if len(answer) > 50 else answer
+        return answer[:60] + "..." if len(answer) > 60 else answer
+
     return "완료"
