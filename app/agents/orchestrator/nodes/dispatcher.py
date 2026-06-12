@@ -692,9 +692,29 @@ def _fetch_all_from_server(
         api_list = data.get("apis", [])
         nlsr = data.get("naturalLanguageScenarioRequest", {})
 
+        # ✅ api_list의 operationId/domainTag를 method+path 기준으로 매핑
+        op_map: dict[tuple[str, str], dict] = {}
+        for api in api_list:
+            key = (api.get("method", "").upper(), api.get("path", ""))
+            op_map[key] = {
+                "operationId": api.get("operationId"),
+                "domainTag": api.get("domainTag"),
+            }
+
+        # ✅ nlsr의 endpoints에 summary(operationId), tags(domainTag) 보강
+        endpoints = nlsr.get("api_inventory", {}).get("endpoints", [])
+        for ep in endpoints:
+            key = (ep.get("method", "").upper(), ep.get("path", ""))
+            extra = op_map.get(key)
+            if extra:
+                if not ep.get("summary") and extra.get("operationId"):
+                    ep["summary"] = extra["operationId"]
+                if not ep.get("tags") and extra.get("domainTag"):
+                    ep["tags"] = [extra["domainTag"]]
+
         logger.info(f"[scenarios] 서버에서 API {len(api_list)}개, "
                     f"naturalLanguageScenarioRequest 조회됨 "
-                    f"(endpoints={len(nlsr.get('api_inventory', {}).get('endpoints', []))}, "
+                    f"(endpoints={len(endpoints)}, "
                     f"existing_test_cases={len(nlsr.get('existing_test_cases', []))}, "
                     f"existing_scenarios={len(nlsr.get('existing_scenarios', []))})")
 
