@@ -14,7 +14,8 @@
 
 구현 상태:
 - intent_parser: stub
-- recommender:   stub
+- recommender:   실제 구현 (LLM 없음, 규칙 기반). api_inventory + existing_test_cases를
+                 보고 커버리지 갭(coverage_gaps)을 도출해 planner 입력으로 넘김.
 - planner:       실제 구현 (Claude 호출)
 - chainer:       실제 구현 (Claude 호출)
 - dedup:         실제 구현 + 연결 완료 (LLM 없음). existing_test_cases와 비교해
@@ -33,12 +34,12 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.scenario.nodes._stubs import (
     intent_parser_node,
-    recommender_node,
     route_after_intent,
 )
 from app.agents.scenario.nodes.chainer import make_chainer_node
 from app.agents.scenario.nodes.dedup import dedup_node
 from app.agents.scenario.nodes.planner import make_planner_node
+from app.agents.scenario.nodes.recommender import recommender_node
 from app.agents.scenario.nodes.risk import risk_node
 from app.agents.scenario.nodes.validator import validator_node
 from app.agents.scenario.state import ScenarioAgentState
