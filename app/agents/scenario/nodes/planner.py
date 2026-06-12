@@ -120,6 +120,8 @@ def make_planner_node(llm: LLMClient):
         inventory = request.api_inventory
 
         # 자연어 모드만 우선 구현
+        endpoint_ids: list[str] | None = None  # None이면 전체(자연어 모드)
+
         if request.mode == ScenarioGenerationMode.NATURAL_LANGUAGE:
             if not request.user_intent:
                 return _err_only("planner", "MISSING_USER_INTENT",
@@ -134,12 +136,25 @@ def make_planner_node(llm: LLMClient):
             user_intent = "\n".join(
                 f"- {g['description']}: {g['suggested_flow']}" for g in gaps
             )
+            # 갭에 연관된 endpoint만 planner에 노출 → 토큰 폭증/빈 출력 방지.
+            # 순서 유지하며 중복 제거.
+            seen: set[str] = set()
+            endpoint_ids = []
+            for g in gaps:
+                for eid in g.get("related_endpoint_ids", []):
+                    if eid not in seen:
+                        seen.add(eid)
+                        endpoint_ids.append(eid)
+            # 갭에 endpoint가 하나도 안 달려 있으면 전체로 폴백
+            if not endpoint_ids:
+                endpoint_ids = None
 
         user_prompt = build_user_prompt(
             user_intent=user_intent,
             inventory=inventory,
             max_scenarios=request.max_scenarios,
             max_steps_per_scenario=request.max_steps_per_scenario,
+            endpoint_ids=endpoint_ids,
         )
 
         try:
@@ -149,7 +164,7 @@ def make_planner_node(llm: LLMClient):
                 output_schema=PlannerOutput.model_json_schema(),
                 output_name="emit_scenarios",
                 output_description="설계된 시나리오 목록을 반환",
-                max_tokens=4096,
+                max_tokens=8192,   # 4096 → 8192: 시나리오 여러 개 출력 시 잘림 방지
                 temperature=0.1,
             )
         except Exception as e:
